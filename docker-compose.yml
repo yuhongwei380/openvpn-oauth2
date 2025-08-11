@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  openvpn:
+    image: yuhongwei1997/openvpn-oauth2:v2.0
+    container_name: openvpn-oauth2
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "${OVPN_PORT}:${OVPN_PORT}/udp"
+      - "5555:5555"
+    env_file:
+      - .env
+    volumes:
+      - ./certs:/etc/openvpn/certs
+    privileged: true
+    network_mode: "host"  # 使用host网络
+      #sysctls:
+      #- net.ipv4.ip_forward=1
+        #  - net.ipv6.conf.all.forwarding=1
+    healthcheck:
+      test: ["CMD", "pgrep", "openvpn"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      
+  openvpn-monitor:
+    image: ruimarinho/openvpn-monitor
+    container_name: openvpn-monitor
+    ports:
+      - "80:80"
+    environment:
+      # 默认设置
+      - OPENVPNMONITOR_DEFAULT_DATETIMEFORMAT=%%d/%%m/%%Y
+      - OPENVPNMONITOR_DEFAULT_SITE=OpenVPN Server
+
+      # UDP 站点配置（包含密码）
+      - OPENVPNMONITOR_SITES_0_ALIAS=Default Server
+      - OPENVPNMONITOR_SITES_0_HOST=127.0.0.1  # 替换为你的 OpenVPN 主机IP或容器名,已采用host网络模式，可不用修改
+      - OPENVPNMONITOR_SITES_0_NAME=Default Server
+      - OPENVPNMONITOR_SITES_0_PORT=5555
+      - OPENVPNMONITOR_SITES_0_SHOWDISCONNECT=True
+      - OPENVPNMONITOR_SITES_0_PASSWORD=admin  # 管理密码
+    network_mode: "host"
+    restart: unless-stopped
+
+
+volumes:
+  certs:
