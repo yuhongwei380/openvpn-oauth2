@@ -63,19 +63,7 @@ echo "🔐 生成 OAuth2 配置文件..."
 # 创建 sysconfig 目录
 mkdir -p /etc/sysconfig
 
-# 生成 OAuth2 配置文件
-cat <<EOF > /etc/sysconfig/openvpn-auth-oauth2
-CONFIG_OAUTH2_ISSUER=${OAUTH2_ISSUER:-"https://login.microsoftonline.com/<tenant-id>/v2.0"}
-CONFIG_OAUTH2_CLIENT_ID=${OAUTH2_CLIENT_ID}
-CONFIG_OAUTH2_CLIENT_SECRET=${OAUTH2_CLIENT_SECRET}
-CONFIG_HTTP_SECRET=${OAUTH2_HTTP_SECRET}
-CONFIG_HTTP_BASEURL=${OAUTH2_HTTP_BASEURL}
-CONFIG_HTTP_LISTEN=${OAUTH2_HTTP_LISTEN:-":9000"}
-CONFIG_OPENVPN_ADDR=${OAUTH2_OPENVPN_ADDR:-"unix:///run/openvpn/server.sock"}
-CONFIG_OPENVPN_PASSWORD=${OAUTH2_OPENVPN_PASSWORD:-"admin"}
-EOF
 
-echo "✅ OAuth2 配置文件生成完成"
 
 # ==============================================
 # 网络配置（IPv4/IPv6 NAT和转发）
