@@ -43,6 +43,14 @@ RUN mkdir -p /etc/openvpn/certs \
     /etc/openvpn/client-configs \
     /usr/local/bin \
     /etc/sysconfig
+    
+# 下载并解压 openvpn-auth-oauth2
+RUN cd /tmp/openvpn-oauth2 && \
+    wget https://github.com/jkroepke/openvpn-auth-oauth2/releases/download/v1.25.2/openvpn-auth-oauth2_1.25.2_linux_amd64.tar.xz && \
+    tar xf openvpn-auth-oauth2_1.25.2_linux_amd64.tar.xz && \
+    cp openvpn-auth-oauth2 /usr/local/bin/ && \
+    chmod +x /usr/local/bin/openvpn-auth-oauth2 && \
+    rm -rf /tmp/openvpn-oauth2
 
 # 添加配置文件和脚本
 COPY entrypoint.sh /usr/local/bin/
