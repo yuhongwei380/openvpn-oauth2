@@ -18,8 +18,7 @@ ${OVPN_IPV6_CONFIG}
 ${OVPN_IPV6_ROUTE}
 ${OVPN_IPV6_DNS}
 
-# LDAP认证
-plugin /usr/lib/openvpn/openvpn-auth-ldap.so /etc/openvpn/auth/ldap.conf
+
 verify-client-cert none
 username-as-common-name
 
