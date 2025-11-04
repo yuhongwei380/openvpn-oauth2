@@ -7,7 +7,7 @@ ENV TZ=Asia/Shanghai
 RUN date
 
 # 安装依赖
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     openvpn \
     easy-rsa \
     iptables \
