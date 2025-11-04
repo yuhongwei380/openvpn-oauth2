@@ -3,11 +3,6 @@ FROM ubuntu:24.04
 # 设置非交互模式，避免 tzdata 配置时的交互提示
 ENV TZ=Asia/Shanghai
 
-# 更新包列表，安装 tzdata（时区数据），并设置时区
-RUN apt-get update && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
 # 可选：验证时区
 RUN date
 
