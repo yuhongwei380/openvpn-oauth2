@@ -20,12 +20,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     gnupg \
     wget \
+    ca-certificates \ # 确保安装 ca-certificates
     && rm -rf /var/lib/apt/lists/*
 
 # 添加 openvpn-auth-oauth2 的 apt 源并安装
 WORKDIR /tmp
-RUN wget https://github.com/jkroepke/openvpn-auth-oauth2/releases/download/v1.26.2/openvpn-auth-oauth2_1.26.2_linux_amd64.deb
-RUN dpkg -i openvpn-auth-oauth2_1.26.2_linux_amd64.deb
+# 下载 .deb 包
+RUN wget https://github.com/jkroepke/openvpn-auth-oauth2/releases/download/v1.26.2/openvpn-auth-oauth2_1.26.2_linux_amd64.deb && \
+    # 安装 .deb 包
+    dpkg -i openvpn-auth-oauth2_1.26.2_linux_amd64.deb && \
+    # 清理下载的 .deb 文件以减小镜像大小
+    rm openvpn-auth-oauth2_1.26.2_linux_amd64.deb
+
+# 如果需要，可以继续后续的配置步骤...
 
 # 创建目录结构
 RUN mkdir -p /etc/openvpn/certs \
