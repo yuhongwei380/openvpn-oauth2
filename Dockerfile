@@ -29,6 +29,7 @@ WORKDIR /tmp
 RUN wget https://github.com/jkroepke/openvpn-auth-oauth2/releases/download/v1.26.2/openvpn-auth-oauth2_1.26.2_linux_amd64.deb && \
     # 安装 .deb 包
     dpkg -i openvpn-auth-oauth2_1.26.2_linux_amd64.deb && \
+    cp /usr/bin/openvpn-auth-oauth2 /usr/local/bin/openvpn-auth-oauth2
     # 清理下载的 .deb 文件以减小镜像大小
     rm openvpn-auth-oauth2_1.26.2_linux_amd64.deb
 
