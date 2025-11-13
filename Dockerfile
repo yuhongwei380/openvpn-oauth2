@@ -22,10 +22,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # 添加 openvpn-auth-oauth2 的 apt 源并安装
-RUN curl -L https://raw.githubusercontent.com/jkroepke/openvpn-auth-oauth2/refs/heads/main/packaging/apt/openvpn-auth-oauth2.sources | sudo tee /etc/apt/sources.list.d/openvpn-auth-oauth2.sources \
-    apt-get update  \
-    apt-get install -y openvpn-auth-oauth2  \
-    rm -rf /var/lib/apt/lists/*
+WORKDIR /tmp
+RUN wget https://github.com/jkroepke/openvpn-auth-oauth2/releases/download/v1.26.2/openvpn-auth-oauth2_1.26.2_linux_amd64.deb
+RUN dpkg -i openvpn-auth-oauth2_1.26.2_linux_amd64.deb
 
 # 创建目录结构
 RUN mkdir -p /etc/openvpn/certs \
