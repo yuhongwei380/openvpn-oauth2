@@ -14,11 +14,9 @@ services:
       - .env
     volumes:
       - ./certs:/etc/openvpn/certs
+      - ./openvpn-auth-oauth2-config.yaml:/app/config.yaml
     privileged: true
     network_mode: "host"  # 使用host网络
-      #sysctls:
-      #- net.ipv4.ip_forward=1
-        #  - net.ipv6.conf.all.forwarding=1
     healthcheck:
       test: ["CMD", "pgrep", "openvpn"]
       interval: 30s
