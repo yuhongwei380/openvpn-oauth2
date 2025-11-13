@@ -32,8 +32,6 @@ RUN wget https://github.com/jkroepke/openvpn-auth-oauth2/releases/download/v1.26
     # 清理下载的 .deb 文件以减小镜像大小
     rm openvpn-auth-oauth2_1.26.2_linux_amd64.deb
 
-# 如果需要，可以继续后续的配置步骤...
-
 # 创建目录结构
 RUN mkdir -p /etc/openvpn/certs \
     /etc/openvpn/auth \
@@ -41,13 +39,7 @@ RUN mkdir -p /etc/openvpn/certs \
     /usr/local/bin \
     /etc/sysconfig
     
-# 下载并解压 openvpn-auth-oauth2
-RUN cd /tmp/openvpn-oauth2 && \
-    wget https://github.com/jkroepke/openvpn-auth-oauth2/releases/download/v1.25.2/openvpn-auth-oauth2_1.25.2_linux_amd64.tar.xz && \
-    tar xf openvpn-auth-oauth2_1.25.2_linux_amd64.tar.xz && \
-    cp openvpn-auth-oauth2 /usr/local/bin/ && \
-    chmod +x /usr/local/bin/openvpn-auth-oauth2 && \
-    rm -rf /tmp/openvpn-oauth2
+
 
 # 添加配置文件和脚本
 COPY entrypoint.sh /usr/local/bin/
