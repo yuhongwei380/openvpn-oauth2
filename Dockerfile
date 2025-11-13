@@ -26,9 +26,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 添加 openvpn-auth-oauth2 的 apt 源并安装
 WORKDIR /tmp
 # 下载 .deb 包
-RUN wget https://github.com/jkroepke/openvpn-auth-oauth2/releases/download/v1.26.2/openvpn-auth-oauth2_1.26.2_linux_amd64.deb && \
+RUN wget https://github.com/jkroepke/openvpn-auth-oauth2/releases/download/v1.25.2/openvpn-auth-oauth2_1.25.2_linux_amd64.deb && \
     # 安装 .deb 包
-    dpkg -i openvpn-auth-oauth2_1.26.2_linux_amd64.deb && \
+    dpkg -i openvpn-auth-oauth2_1.25.2_linux_amd64.deb && \
     cp /usr/bin/openvpn-auth-oauth2 /usr/local/bin/openvpn-auth-oauth2
 
 # 创建目录结构
