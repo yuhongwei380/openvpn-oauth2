@@ -20,8 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     gnupg \
     wget \
-    ca-certificates \ # 确保安装 ca-certificates
-    && rm -rf /var/lib/apt/lists/*
+    ca-certificates  # 确保安装 ca-certificates
+
 
 # 添加 openvpn-auth-oauth2 的 apt 源并安装
 WORKDIR /tmp
