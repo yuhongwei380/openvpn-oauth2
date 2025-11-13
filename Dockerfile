@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     vim \
     curl \
     gnupg \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
 # 添加 openvpn-auth-oauth2 的 apt 源并安装
