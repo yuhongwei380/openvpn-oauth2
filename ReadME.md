@@ -1,5 +1,4 @@
-# Test project  NOT AVAILIABLE
-
+# Test project,  NO test
 # Info about this project
 
 Openvpn Connect to oauth2
