@@ -252,9 +252,9 @@ class VpnInstanceControlTest(unittest.TestCase):
             with mock.patch.object(
                 vpn_control_client, "urlopen", return_value=Response()
             ) as open_request:
-                result = vpn_control_client.request("restart")
+                result = vpn_control_client.request("reload")
             request_value = open_request.call_args.args[0]
-            self.assertEqual(request_value.full_url, "http://127.0.0.1:9090/restart")
+            self.assertEqual(request_value.full_url, "http://127.0.0.1:9090/reload")
             self.assertEqual(request_value.method, "POST")
             self.assertEqual(
                 request_value.get_header("Authorization"), "Bearer test-token"
@@ -263,6 +263,31 @@ class VpnInstanceControlTest(unittest.TestCase):
         finally:
             vpn_control_client.CONTROL_URL = original_url
             vpn_control_client.CONTROL_TOKEN = original_token
+
+    def test_reload_targets_only_openvpn_process_in_instance_group(self):
+        with tempfile.TemporaryDirectory() as directory:
+            original_proc = vpn_control.PROC_ROOT
+            try:
+                vpn_control.PROC_ROOT = Path(directory)
+                process_dir = vpn_control.PROC_ROOT / "123"
+                process_dir.mkdir()
+                (process_dir / "cmdline").write_bytes(b"/usr/sbin/openvpn\0--config\0")
+                (process_dir / "stat").write_text(
+                    "123 (openvpn) S 500 500 500 0 0\n", encoding="utf-8"
+                )
+                manager = vpn_control.InstanceManager()
+                manager.process = mock.Mock(pid=500)
+                manager.process.poll.return_value = None
+                with mock.patch.object(vpn_control.os, "kill") as kill:
+                    manager.reload()
+                kill.assert_called_once_with(123, vpn_control.RELOAD_SIGNAL)
+            finally:
+                vpn_control.PROC_ROOT = original_proc
+
+    def test_instance_lock_is_persisted(self):
+        with mock.patch.object(storage, "set_setting") as set_setting:
+            self.assertTrue(server.set_instance_locked(True))
+        set_setting.assert_called_once_with("instance-lock", True)
 
 
 if __name__ == "__main__":

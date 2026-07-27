@@ -75,23 +75,24 @@
           </section>
 
           <section class="view" id="view-instance">
-            <div class="page-heading"><div><p class="eyebrow">VPN INSTANCE</p><h1>VPN 实例</h1><p>运维面板常驻运行，可独立启动、停止或重启 OpenVPN 实例。</p></div><span class="health-pill" id="instanceHealth"><span></span><b>正在检查</b></span></div>
+            <div class="page-heading"><div><p class="eyebrow">VPN INSTANCE</p><h1>VPN 实例</h1><p>在实例上下文中管理服务、身份源和运行状态。</p></div><div class="instance-heading-state"><span class="health-pill" id="instanceHealth"><span></span><b>正在检查</b></span><button class="button secondary compact" id="toggleInstanceLock"><svg><use href="#icon-lock"/></svg><span>锁定实例</span></button></div></div>
             <article class="panel instance-card">
-              <div class="instance-lead"><span class="instance-mark"><svg><use href="#icon-server"/></svg></span><div><div class="instance-title"><h2>default</h2><span class="status-badge" id="instanceStateBadge">正在检查</span></div><p>OAuth2 单实例 · 独立进程生命周期控制</p></div><strong id="instanceOnline">0 <small>在线</small></strong></div>
+              <div class="instance-lead"><span class="instance-mark"><svg><use href="#icon-server"/></svg></span><div><div class="instance-title"><h2>default</h2><span class="status-badge" id="instanceStateBadge">正在检查</span><span class="lock-badge" id="instanceLockBadge"><svg><use href="#icon-lock"/></svg>锁定保护</span></div><p>OAuth2 单实例 · 独立进程生命周期控制</p></div><strong id="instanceOnline">0 <small>在线</small></strong></div>
               <div class="instance-controls" aria-label="VPN 实例控制">
                 <div><strong>实例控制</strong><small id="instanceControlHint">正在连接内部控制服务</small></div>
                 <div class="instance-control-actions">
                   <button class="button secondary" id="startInstance"><svg><use href="#icon-play"/></svg>启动</button>
                   <button class="button secondary" id="restartInstance"><svg><use href="#icon-refresh"/></svg>重启</button>
+                  <button class="button secondary" id="reloadInstance"><svg><use href="#icon-activity"/></svg>重载</button>
                   <button class="button danger-outline" id="stopInstance"><svg><use href="#icon-stop"/></svg>停止</button>
                 </div>
               </div>
               <div class="instance-facts" id="instanceFacts"></div>
               <div class="instance-workflow">
-                <button class="workflow-step active" data-go="settings"><span>01</span><strong>服务配置</strong><small>通过网页集中管理</small></button>
-                <button class="workflow-step" data-go="certificates"><span>02</span><strong>证书材料</strong><small id="instanceCertificateState">正在检查</small></button>
-                <button class="workflow-step" data-go="profiles"><span>03</span><strong>客户端配置</strong><small>生成与导出</small></button>
-                <button class="workflow-step" data-go="docs"><span>04</span><strong>部署运维</strong><small>查看本地文档</small></button>
+                <button class="workflow-step active" id="openVpnServiceDialog"><span>01</span><strong>VPN 服务配置</strong><small>端点、地址池与路由</small></button>
+                <button class="workflow-step" id="openIdentitySourceDialog"><span>02</span><strong>身份源配置</strong><small>OAuth2 提供商与凭据</small></button>
+                <button class="workflow-step" data-go="certificates"><span>03</span><strong>证书材料</strong><small id="instanceCertificateState">正在检查</small></button>
+                <button class="workflow-step" data-go="profiles"><span>04</span><strong>客户端配置</strong><small>生成与导出</small></button>
               </div>
               <div class="orchestration-note"><svg><use href="#icon-info"/></svg><div><strong>控制面与数据面已解耦</strong><p>停止操作只会结束 OpenVPN 与 OAuth2 实例进程；内部控制服务和运维面板保持在线，可随时从本页面重新启动。</p></div></div>
             </article>
@@ -160,63 +161,14 @@
 
           <section class="view" id="view-settings">
             <div class="page-heading">
-              <div><p class="eyebrow">SYSTEM SETTINGS</p><h1>系统设置</h1><p>集中管理 VPN、OAuth2、网络、审计和控制台安全参数。</p></div>
+              <div><p class="eyebrow">SYSTEM SETTINGS</p><h1>系统设置</h1><p>管理控制台安全、证书初始化与审计策略。</p></div>
               <span class="readonly-pill" id="settingsState"><svg><use href="#icon-lock"/></svg>持久化配置</span>
             </div>
             <div class="configuration-intro">
-              <div><span class="section-kicker">配置策略</span><h2>日常调整留在控制台</h2><p>保存后写入持久化卷。流量采集与控制台安全即时生效；OpenVPN、OAuth2 和网络参数在网页重启 VPN 实例后生效。</p></div>
+              <div><span class="section-kicker">配置边界</span><h2>实例配置已归位</h2><p>VPN 服务与身份源已移至 VPN 实例页面，通过独立弹窗维护。这里仅保留跨实例的运行策略与控制台安全。</p></div>
               <dl><div><dt>环境变量</dt><dd>仅保留加密主密钥与首次登录密码</dd></div><div><dt>敏感字段</dt><dd>AES-256 加密后落盘，不回传明文</dd></div></dl>
             </div>
             <form id="systemSettingsForm" class="configuration-form">
-              <article class="panel configuration-panel">
-                <div class="panel-header"><div><h2>OpenVPN 服务</h2><p>客户端端点、隧道设备与 IPv4 地址池</p></div><span class="apply-badge restart">重启实例后生效</span></div>
-                <div class="form-grid">
-                  <label class="field field-wide"><span>公网域名或 IP</span><input name="server.remoteHost" maxlength="253" placeholder="vpn.example.com" /><small>生成客户端配置时使用的连接地址</small></label>
-                  <label class="field"><span>监听端口</span><input name="server.port" type="number" min="1" max="65535" required /></label>
-                  <label class="field"><span>传输协议</span><select name="server.protocol"><option value="udp">UDP</option><option value="tcp-server">TCP Server</option></select></label>
-                  <label class="field"><span>隧道设备</span><select name="server.device"><option value="tun">TUN（路由）</option><option value="tap">TAP（桥接）</option></select></label>
-                  <label class="field"><span>数据通道加密</span><select name="server.cipher"><option value="AES-256-GCM">AES-256-GCM</option><option value="AES-128-GCM">AES-128-GCM</option><option value="CHACHA20-POLY1305">CHACHA20-POLY1305</option></select></label>
-                  <label class="field"><span>IPv4 地址池</span><input name="server.network" placeholder="10.7.0.0" required /></label>
-                  <label class="field"><span>IPv4 子网掩码</span><input name="server.netmask" placeholder="255.255.0.0" required /></label>
-                  <label class="field field-wide"><span>推送 DNS</span><input name="server.dns" placeholder="192.168.1.1" /><small>留空表示不向客户端推送 IPv4 DNS</small></label>
-                </div>
-              </article>
-
-              <article class="panel configuration-panel">
-                <div class="panel-header"><div><h2>路由与 IPv6</h2><p>NAT、IPv6 地址池和内部路由</p></div><span class="apply-badge restart">重启实例后生效</span></div>
-                <div class="switch-list">
-                  <label class="switch-row"><span><strong>IPv4 NAT</strong><small>允许 VPN 客户端通过宿主机访问外部网络</small></span><input type="checkbox" name="networking.ipv4Nat" /><i></i></label>
-                  <label class="switch-row"><span><strong>启用 IPv6</strong><small>为客户端分配 IPv6 地址并开启转发</small></span><input type="checkbox" name="networking.ipv6Enabled" id="ipv6Enabled" /><i></i></label>
-                  <label class="switch-row"><span><strong>IPv6 NAT</strong><small>对 VPN IPv6 地址池执行出口地址转换</small></span><input type="checkbox" name="networking.ipv6Nat" /><i></i></label>
-                </div>
-                <div class="form-grid conditional-fields" id="ipv6Fields">
-                  <label class="field"><span>IPv6 地址池</span><input name="networking.ipv6Network" placeholder="fd12:3456:789a::/64" /></label>
-                  <label class="field"><span>IPv6 默认路由</span><input name="networking.ipv6Route" placeholder="2000::/3" /></label>
-                  <label class="field field-wide"><span>IPv6 DNS</span><input name="networking.ipv6Dns" placeholder="2400:3200::1" /></label>
-                  <label class="field"><span>内部路由 1</span><input name="networking.ipv6InternalRoutes.0" placeholder="fd00:2024:db6::/64" /></label>
-                  <label class="field"><span>内部路由 2</span><input name="networking.ipv6InternalRoutes.1" placeholder="fd00:2024:db8::/64" /></label>
-                  <label class="field field-wide"><span>内部路由 3</span><input name="networking.ipv6InternalRoutes.2" placeholder="fd00:2024:dbf::/64" /></label>
-                </div>
-                <div class="form-grid route-interface-field">
-                  <label class="field field-wide"><span>NAT 出口网卡</span><input name="networking.outboundInterface" placeholder="eth0" required /><small>使用 host 网络时请填写宿主机实际出口网卡</small></label>
-                </div>
-              </article>
-
-              <article class="panel configuration-panel">
-                <div class="panel-header"><div><h2>OAuth2 认证</h2><p>身份提供商、客户端和回调参数</p></div><span class="apply-badge restart">重启实例后生效</span></div>
-                <div class="form-grid">
-                  <label class="field field-wide"><span>Issuer URL</span><input name="oauth2.issuer" type="url" placeholder="https://login.example.com/realms/vpn" /></label>
-                  <label class="field field-wide"><span>Client ID</span><input name="oauth2.clientId" autocomplete="off" /></label>
-                  <label class="field field-wide"><span>Client Secret</span><input name="secrets.clientSecret" type="password" autocomplete="new-password" placeholder="留空表示保持现有 Secret" /><small id="clientSecretState">尚未配置</small></label>
-                  <label class="field field-wide"><span>回调基础地址</span><input name="oauth2.baseUrl" type="url" placeholder="https://vpn.example.com/oauth2/callback" /></label>
-                  <label class="field"><span>认证服务监听</span><input name="oauth2.httpListen" placeholder=":9000" required /></label>
-                  <label class="field"><span>OpenVPN 管理地址</span><input name="oauth2.openvpnAddress" required /></label>
-                  <label class="field"><span>管理接口密码</span><input name="secrets.managementPassword" type="password" minlength="8" autocomplete="new-password" placeholder="留空表示保持现有密码" /><small id="managementPasswordState">尚未配置</small></label>
-                  <label class="field"><span>HTTP 会话 Secret</span><input name="secrets.httpSecret" type="password" autocomplete="new-password" minlength="16" maxlength="32" placeholder="留空表示保持现有 Secret" /><small id="httpSecretState">须为 16、24 或 32 个字符</small></label>
-                  <div class="encryption-note field-wide" id="encryptionNote"><svg><use href="#icon-lock"/></svg><span>敏感字段使用环境变量中的加密主密钥加密保存。</span></div>
-                </div>
-              </article>
-
               <article class="panel configuration-panel">
                 <div class="panel-header"><div><h2>运行策略</h2><p>证书初始化、默认配置和流量审计</p></div><span class="apply-badge live">部分即时生效</span></div>
                 <div class="switch-list">
@@ -267,6 +219,66 @@
       </main>
     </div>
 
+    <dialog id="vpnServiceDialog" class="wide-dialog">
+      <form method="dialog" class="dialog-card" id="vpnServiceForm">
+        <div class="dialog-header"><div><span class="dialog-icon"><svg><use href="#icon-server"/></svg></span><div><h2>VPN 服务配置</h2><p>配置 default 实例的端点、地址池、路由与 IPv6。</p></div></div><button class="icon-button" value="cancel" aria-label="关闭 VPN 服务配置"><svg><use href="#icon-x"/></svg></button></div>
+        <div class="dialog-body dialog-sections">
+          <fieldset><legend>服务端点</legend><div class="form-grid">
+            <label class="field field-wide"><span>公网域名或 IP</span><input name="server.remoteHost" maxlength="253" placeholder="vpn.example.com" /><small>生成客户端配置时使用的连接地址</small></label>
+            <label class="field"><span>监听端口</span><input name="server.port" type="number" min="1" max="65535" required /></label>
+            <label class="field"><span>传输协议</span><select name="server.protocol"><option value="udp">UDP</option><option value="tcp-server">TCP Server</option></select></label>
+            <label class="field"><span>隧道设备</span><select name="server.device"><option value="tun">TUN（路由）</option><option value="tap">TAP（桥接）</option></select></label>
+            <label class="field"><span>数据通道加密</span><select name="server.cipher"><option value="AES-256-GCM">AES-256-GCM</option><option value="AES-128-GCM">AES-128-GCM</option><option value="CHACHA20-POLY1305">CHACHA20-POLY1305</option></select></label>
+            <label class="field"><span>IPv4 地址池</span><input name="server.network" placeholder="10.7.0.0" required /></label>
+            <label class="field"><span>IPv4 子网掩码</span><input name="server.netmask" placeholder="255.255.0.0" required /></label>
+            <label class="field field-wide"><span>推送 DNS</span><input name="server.dns" placeholder="192.168.1.1" /></label>
+          </div></fieldset>
+          <fieldset><legend>路由与 IPv6</legend>
+            <div class="switch-list">
+              <label class="switch-row"><span><strong>IPv4 NAT</strong><small>允许客户端通过宿主机访问外部网络</small></span><input type="checkbox" name="networking.ipv4Nat" /><i></i></label>
+              <label class="switch-row"><span><strong>启用 IPv6</strong><small>分配 IPv6 地址并开启转发</small></span><input type="checkbox" name="networking.ipv6Enabled" id="ipv6Enabled" /><i></i></label>
+              <label class="switch-row"><span><strong>IPv6 NAT</strong><small>对 VPN IPv6 地址池执行出口转换</small></span><input type="checkbox" name="networking.ipv6Nat" /><i></i></label>
+            </div>
+            <div class="form-grid conditional-fields" id="ipv6Fields">
+              <label class="field"><span>IPv6 地址池</span><input name="networking.ipv6Network" placeholder="fd12:3456:789a::/64" /></label>
+              <label class="field"><span>IPv6 默认路由</span><input name="networking.ipv6Route" placeholder="2000::/3" /></label>
+              <label class="field field-wide"><span>IPv6 DNS</span><input name="networking.ipv6Dns" placeholder="2400:3200::1" /></label>
+              <label class="field"><span>内部路由 1</span><input name="networking.ipv6InternalRoutes.0" placeholder="fd00:2024:db6::/64" /></label>
+              <label class="field"><span>内部路由 2</span><input name="networking.ipv6InternalRoutes.1" placeholder="fd00:2024:db8::/64" /></label>
+              <label class="field field-wide"><span>内部路由 3</span><input name="networking.ipv6InternalRoutes.2" placeholder="fd00:2024:dbf::/64" /></label>
+            </div>
+            <div class="form-grid route-interface-field"><label class="field field-wide"><span>NAT 出口网卡</span><input name="networking.outboundInterface" placeholder="eth0" required /></label></div>
+          </fieldset>
+          <p class="form-error" id="vpnServiceError" role="alert"></p>
+        </div>
+        <div class="dialog-actions"><span class="dialog-apply-note">保存后需重载或重启 VPN 实例</span><button class="button secondary" value="cancel">取消</button><button class="button primary" id="saveVpnService" value="default">保存服务配置</button></div>
+      </form>
+    </dialog>
+    <dialog id="identitySourceDialog">
+      <form method="dialog" class="dialog-card" id="identitySourceForm">
+        <div class="dialog-header"><div><span class="dialog-icon"><svg><use href="#icon-key"/></svg></span><div><h2>身份源配置</h2><p>配置 default 实例使用的 OAuth2 身份提供商。</p></div></div><button class="icon-button" value="cancel" aria-label="关闭身份源配置"><svg><use href="#icon-x"/></svg></button></div>
+        <div class="dialog-body form-grid">
+          <label class="field field-wide"><span>Issuer URL</span><input name="oauth2.issuer" type="url" placeholder="https://login.example.com/realms/vpn" /></label>
+          <label class="field field-wide"><span>Client ID</span><input name="oauth2.clientId" autocomplete="off" /></label>
+          <label class="field field-wide"><span>Client Secret</span><input name="secrets.clientSecret" type="password" autocomplete="new-password" placeholder="留空表示保持现有 Secret" /><small id="clientSecretState">尚未配置</small></label>
+          <label class="field field-wide"><span>回调基础地址</span><input name="oauth2.baseUrl" type="url" placeholder="https://vpn.example.com/oauth2/callback" /></label>
+          <label class="field"><span>认证服务监听</span><input name="oauth2.httpListen" placeholder=":9000" required /></label>
+          <label class="field"><span>OpenVPN 管理地址</span><input name="oauth2.openvpnAddress" required /></label>
+          <label class="field"><span>管理接口密码</span><input name="secrets.managementPassword" type="password" minlength="8" autocomplete="new-password" placeholder="留空表示保持现有密码" /><small id="managementPasswordState">尚未配置</small></label>
+          <label class="field"><span>HTTP 会话 Secret</span><input name="secrets.httpSecret" type="password" autocomplete="new-password" minlength="16" maxlength="32" placeholder="留空表示保持现有 Secret" /><small id="httpSecretState">须为 16、24 或 32 个字符</small></label>
+          <div class="encryption-note field-wide" id="encryptionNote"><svg><use href="#icon-lock"/></svg><span>敏感字段使用环境变量中的加密主密钥加密保存。</span></div>
+          <p class="form-error field-wide" id="identitySourceError" role="alert"></p>
+        </div>
+        <div class="dialog-actions"><span class="dialog-apply-note">保存后需重载或重启 VPN 实例</span><button class="button secondary" value="cancel">取消</button><button class="button primary" id="saveIdentitySource" value="default">保存身份源</button></div>
+      </form>
+    </dialog>
+    <dialog id="instanceActionDialog">
+      <form method="dialog" class="dialog-card confirm-card" id="instanceActionForm">
+        <div class="dialog-header"><div><span class="dialog-icon action-dialog-icon"><svg><use href="#icon-info"/></svg></span><div><h2 id="instanceActionTitle">确认操作</h2><p id="instanceActionSummary"></p></div></div><button class="icon-button" value="cancel" aria-label="取消操作"><svg><use href="#icon-x"/></svg></button></div>
+        <div class="dialog-body"><div class="action-impact"><strong>操作影响</strong><p id="instanceActionImpact"></p></div></div>
+        <div class="dialog-actions"><button class="button secondary" value="cancel">取消</button><button class="button primary" id="confirmInstanceAction" value="default">确认</button></div>
+      </form>
+    </dialog>
     <dialog id="profileDialog">
       <form method="dialog" class="dialog-card" id="profileForm">
         <div class="dialog-header"><div><span class="dialog-icon"><svg><use href="#icon-file"/></svg></span><div><h2>生成客户端配置</h2><p>创建一个可下载的 OpenVPN 配置文件。</p></div></div><button class="icon-button" value="cancel" aria-label="关闭"><svg><use href="#icon-x"/></svg></button></div>

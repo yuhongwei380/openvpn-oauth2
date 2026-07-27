@@ -29,6 +29,8 @@ RESTART_DELAY_SECONDS = 3
 STATUS_PATH = Path(
     os.getenv("OPENVPN_STATUS_PATH", "/run/openvpn/openvpn-status.log")
 )
+PROC_ROOT = Path("/proc")
+RELOAD_SIGNAL = getattr(signal, "SIGHUP", 1)
 
 
 class InstanceManager:
@@ -157,6 +159,29 @@ class InstanceManager:
             self._spawn()
             return self.status()
 
+    def reload(self) -> dict:
+        with self.lock:
+            if self.process is None or self.process.poll() is not None:
+                raise RuntimeError("instance is not running")
+            openvpn_pids = []
+            for entry in PROC_ROOT.iterdir():
+                if not entry.name.isdigit():
+                    continue
+                try:
+                    command = (entry / "cmdline").read_bytes().split(b"\0", 1)[0]
+                    stat = (entry / "stat").read_text(encoding="utf-8")
+                    fields = stat[stat.rfind(")") + 2 :].split()
+                    process_group = int(fields[2])
+                except (OSError, ValueError, IndexError):
+                    continue
+                if Path(os.fsdecode(command)).name == "openvpn" and process_group == self.process.pid:
+                    openvpn_pids.append(int(entry.name))
+            if not openvpn_pids:
+                raise RuntimeError("OpenVPN process is not available for reload")
+            for pid in openvpn_pids:
+                os.kill(pid, RELOAD_SIGNAL)
+            return self.status()
+
     def shutdown(self) -> None:
         with self.lock:
             self.shutdown_requested = True
@@ -235,10 +260,13 @@ class ControlHandler(BaseHTTPRequestHandler):
             self._json({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
             return
         action = route.removeprefix("/")
-        if action not in ("start", "stop", "restart"):
+        if action not in ("start", "stop", "restart", "reload"):
             self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             return
-        self._json(getattr(MANAGER, action)())
+        try:
+            self._json(getattr(MANAGER, action)())
+        except RuntimeError as exc:
+            self._json({"error": str(exc)}, HTTPStatus.CONFLICT)
 
     def log_message(self, fmt: str, *args: object) -> None:
         print(f"[vpn-control] {self.address_string()} {fmt % args}", flush=True)

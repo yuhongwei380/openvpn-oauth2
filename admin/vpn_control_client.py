@@ -13,7 +13,7 @@ CONTROL_TOKEN = os.getenv("OPENVPN_CONTROL_TOKEN", "")
 
 
 def request(action: str = "status", timeout: float = 1) -> dict:
-    if action not in ("status", "start", "stop", "restart"):
+    if action not in ("status", "start", "stop", "restart", "reload"):
         raise ValueError("unsupported instance action")
     if not CONTROL_TOKEN:
         return {

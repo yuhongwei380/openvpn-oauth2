@@ -1,6 +1,7 @@
 const state = {
   status: null, connections: [], connectionEvents: [], profiles: [], traffic: null,
-  targets: [], branding: null, settings: null, view: "overview", trafficTimer: null,
+  targets: [], branding: null, settings: null, instance: null, pendingInstanceAction: null,
+  view: "overview", trafficTimer: null,
 };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -198,6 +199,7 @@ async function refreshStatus(showFeedback = false) {
 async function loadInstance() {
   try {
     const instance = await api("/api/instance");
+    state.instance = instance;
     const labels = {
       running: "运行中",
       stopped: "已停止",
@@ -224,9 +226,21 @@ async function loadInstance() {
         : instance.state === "stopped"
           ? "运维面板保持在线，可随时重新启动实例"
           : instance.controller.message || "实例状态正在变化";
-    $("#startInstance").disabled = ["running", "starting"].includes(instance.state);
-    $("#restartInstance").disabled = instance.controller.controller === "unavailable";
-    $("#stopInstance").disabled = ["stopped", "stopping", "unknown"].includes(instance.state);
+    const unavailable = instance.controller.controller === "unavailable";
+    $("#startInstance").disabled = instance.locked || ["running", "starting"].includes(instance.state);
+    $("#restartInstance").disabled = instance.locked || unavailable;
+    $("#reloadInstance").disabled = instance.locked || unavailable || instance.state !== "running";
+    $("#stopInstance").disabled = instance.locked || ["stopped", "stopping", "unknown"].includes(instance.state);
+    $$(".instance-workflow .workflow-step").forEach((button) => {
+      button.disabled = instance.locked;
+      button.title = instance.locked ? "实例已锁定，请先解锁" : "";
+    });
+    const lockButton = $("#toggleInstanceLock");
+    lockButton.classList.toggle("locked", instance.locked);
+    lockButton.querySelector("span").textContent = instance.locked ? "解锁实例" : "锁定实例";
+    $("#instanceLockBadge").classList.toggle("visible", instance.locked);
+    $(".instance-card").classList.toggle("is-locked", instance.locked);
+    $("#instanceControlHint").title = instance.locked ? "实例处于锁定保护状态，所有配置与运行操作均已禁用" : "";
     const config = instance.config;
     $("#instanceFacts").innerHTML = [
       ["服务端点", `${config.remoteHost || "未配置"}:${config.port}`],
@@ -240,14 +254,14 @@ async function loadInstance() {
 }
 
 async function controlInstance(action) {
-  const buttons = ["startInstance", "restartInstance", "stopInstance"].map((id) => $(`#${id}`));
+  const buttons = ["startInstance", "restartInstance", "reloadInstance", "stopInstance"].map((id) => $(`#${id}`));
   buttons.forEach((button) => { button.disabled = true; });
   try {
     const payload = await api(`/api/instance/${action}`, {
       method: "POST",
       body: "{}",
     });
-    const label = { start: "启动指令已发送", restart: "实例正在重启", stop: "实例已停止" }[action];
+    const label = { start: "启动指令已发送", restart: "实例正在重启", reload: "重载指令已发送", stop: "实例已停止" }[action];
     showToast(label);
     await loadInstance();
     await refreshStatus();
@@ -255,6 +269,97 @@ async function controlInstance(action) {
   } catch (error) {
     showToast(error.message);
     await loadInstance();
+  }
+}
+
+const instanceActionCopy = {
+  start: {
+    title: "启动 VPN 实例",
+    summary: "确认启动 default 实例？",
+    impact: "OpenVPN 与 OAuth2 子进程将开始运行，新的客户端连接随后可用。",
+    confirm: "确认启动",
+  },
+  restart: {
+    title: "重启 VPN 实例",
+    summary: "确认重启 default 实例？",
+    impact: "当前 VPN 会话会断开；服务将使用已保存的最新配置重新启动。",
+    confirm: "确认重启",
+  },
+  reload: {
+    title: "重载 VPN 配置",
+    summary: "确认重载 default 实例？",
+    impact: "OpenVPN 将重新读取配置，现有连接可能短暂中断。",
+    confirm: "确认重载",
+  },
+  stop: {
+    title: "停止 VPN 实例",
+    summary: "确认停止 default 实例？",
+    impact: "所有 VPN 会话会立即断开；运维面板仍保持在线，可从本页再次启动。",
+    confirm: "确认停止",
+  },
+};
+
+function openInstanceActionDialog(action) {
+  if (state.instance?.locked) {
+    showToast("VPN 实例已锁定，请先解锁");
+    return;
+  }
+  const copy = instanceActionCopy[action];
+  state.pendingInstanceAction = action;
+  $("#instanceActionTitle").textContent = copy.title;
+  $("#instanceActionSummary").textContent = copy.summary;
+  $("#instanceActionImpact").textContent = copy.impact;
+  const confirm = $("#confirmInstanceAction");
+  confirm.textContent = copy.confirm;
+  confirm.className = `button ${action === "stop" ? "danger" : "primary"}`;
+  $("#instanceActionDialog").showModal();
+}
+
+async function toggleInstanceLock() {
+  const nextAction = state.instance?.locked ? "unlock" : "lock";
+  const button = $("#toggleInstanceLock");
+  button.disabled = true;
+  try {
+    await api(`/api/instance/${nextAction}`, { method: "POST", body: "{}" });
+    showToast(nextAction === "lock" ? "实例已锁定，操作入口已禁用" : "实例已解锁");
+    await loadInstance();
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function openInstanceSettings(dialogSelector) {
+  if (state.instance?.locked) {
+    showToast("VPN 实例已锁定，请先解锁");
+    return;
+  }
+  if (!state.settings) await loadSystemSettings();
+  $(dialogSelector).showModal();
+}
+
+async function saveInstanceSettings(event, dialogSelector, errorSelector, label) {
+  event.preventDefault();
+  const error = $(errorSelector);
+  error.textContent = "";
+  const submit = event.submitter || $("button[type='submit']", event.currentTarget);
+  if (submit) submit.disabled = true;
+  try {
+    const payload = systemSettingsPayload();
+    payload.instanceConfiguration = true;
+    const result = await api("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+    renderSystemSettings(result);
+    $(dialogSelector).close();
+    showToast(`${label}已保存，可重载或重启实例使其生效`);
+    await loadInstance();
+  } catch (saveError) {
+    error.textContent = saveError.message;
+  } finally {
+    if (submit) submit.disabled = false;
   }
 }
 
@@ -571,7 +676,7 @@ async function saveBranding(event) {
 }
 
 function settingInput(name) {
-  return $(`#systemSettingsForm [name="${name}"]`);
+  return $(`[name="${name}"]`);
 }
 
 function setSettingValue(name, value) {
@@ -713,8 +818,8 @@ async function saveSystemSettings(event) {
     });
     renderSystemSettings(result);
     $("#settingsSaveTitle").textContent = "设置已保存";
-    $("#settingsSaveHint").textContent = "审计与安全设置已应用；服务、网络和 OAuth2 参数需重启 VPN 实例";
-    showToast("设置已安全保存；可前往 VPN 实例页面执行重启");
+    $("#settingsSaveHint").textContent = "运行策略与控制台安全设置已应用";
+    showToast("系统设置已安全保存");
   } catch (error) {
     $("#settingsError").textContent = error.message;
   } finally {
@@ -803,17 +908,26 @@ $$("[data-open-profile]").forEach((item) => item.addEventListener("click", openP
 $("#openProfileDialog").addEventListener("click", openProfileDialog);
 $("#profileForm").addEventListener("submit", createProfile);
 $("#refreshButton").addEventListener("click", () => refreshStatus(true));
-$("#startInstance").addEventListener("click", () => controlInstance("start"));
-$("#restartInstance").addEventListener("click", () => {
-  if (window.confirm("确认重启 OpenVPN 实例？当前 VPN 会话会断开。")) {
-    controlInstance("restart");
-  }
+$("#startInstance").addEventListener("click", () => openInstanceActionDialog("start"));
+$("#restartInstance").addEventListener("click", () => openInstanceActionDialog("restart"));
+$("#reloadInstance").addEventListener("click", () => openInstanceActionDialog("reload"));
+$("#stopInstance").addEventListener("click", () => openInstanceActionDialog("stop"));
+$("#toggleInstanceLock").addEventListener("click", toggleInstanceLock);
+$("#instanceActionForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const action = state.pendingInstanceAction;
+  $("#instanceActionDialog").close();
+  if (action) await controlInstance(action);
+  state.pendingInstanceAction = null;
 });
-$("#stopInstance").addEventListener("click", () => {
-  if (window.confirm("确认停止 OpenVPN 实例？运维面板会继续运行，可随时重新启动。")) {
-    controlInstance("stop");
-  }
-});
+$("#openVpnServiceDialog").addEventListener("click", () => openInstanceSettings("#vpnServiceDialog"));
+$("#openIdentitySourceDialog").addEventListener("click", () => openInstanceSettings("#identitySourceDialog"));
+$("#vpnServiceForm").addEventListener("submit", (event) => saveInstanceSettings(
+  event, "#vpnServiceDialog", "#vpnServiceError", "VPN 服务配置",
+));
+$("#identitySourceForm").addEventListener("submit", (event) => saveInstanceSettings(
+  event, "#identitySourceDialog", "#identitySourceError", "身份源配置",
+));
 $("#logoutButton").addEventListener("click", async () => {
   try {
     await fetch("/api/auth/logout", {

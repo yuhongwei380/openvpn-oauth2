@@ -338,6 +338,15 @@ def settings_payload() -> dict:
     }
 
 
+def instance_locked() -> bool:
+    return bool(storage.get_setting("instance-lock", False))
+
+
+def set_instance_locked(locked: bool) -> bool:
+    storage.set_setting("instance-lock", bool(locked))
+    return bool(locked)
+
+
 def create_session(username: str, now: float | None = None) -> str:
     now = time.time() if now is None else now
     token = secrets.token_urlsafe(32)
@@ -532,7 +541,7 @@ class AdminHandler(BaseHTTPRequestHandler):
                 "name": "default",
                 "state": control.get("state", "unknown"),
                 "desiredState": control.get("desiredState", "unknown"),
-                "locked": False,
+                "locked": instance_locked(),
                 "online": len(current["clients"]),
                 "statusAvailable": current["available"],
                 "config": public_config()["server"],
@@ -640,8 +649,15 @@ class AdminHandler(BaseHTTPRequestHandler):
             "/api/instance/start",
             "/api/instance/stop",
             "/api/instance/restart",
+            "/api/instance/reload",
         ):
             action = route.rsplit("/", 1)[-1]
+            if instance_locked():
+                self._json(
+                    {"error": "VPN 实例已锁定，请先解锁后再执行操作"},
+                    HTTPStatus.LOCKED,
+                )
+                return
             result = vpn_control_client.request(action)
             if result.get("controller") == "unavailable":
                 self._json(
@@ -653,6 +669,10 @@ class AdminHandler(BaseHTTPRequestHandler):
                 )
             else:
                 self._json({"instance": result})
+            return
+        if route in ("/api/instance/lock", "/api/instance/unlock"):
+            locked = route.endswith("/lock")
+            self._json({"locked": set_instance_locked(locked)})
             return
         if route != "/api/profiles":
             self._json({"error": "接口不存在"}, HTTPStatus.NOT_FOUND)
@@ -697,6 +717,12 @@ class AdminHandler(BaseHTTPRequestHandler):
                 storage.set_setting("branding", value)
                 self._json(value)
             elif route == "/api/settings":
+                if payload.get("instanceConfiguration") and instance_locked():
+                    self._json(
+                        {"error": "VPN 实例已锁定，请先解锁后再修改配置"},
+                        HTTPStatus.LOCKED,
+                    )
+                    return
                 runtime = runtime_config.save(payload.get("runtime") or {})
                 audit = {
                     "trafficEnabled": bool(

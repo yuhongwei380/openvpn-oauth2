@@ -10,7 +10,7 @@
 ## OpenVPN OAuth2 implementation boundary
 
 - This repository uses OAuth2 as its only identity source. Do not add LDAP source configuration, LDAP forms, or LDAP status treatments.
-- The current runtime is one OpenVPN instance per container. The UI represents the instance as `default`; container lifecycle remains owned by Docker Compose so the Web UI never exposes stop/restart controls that would terminate PID 1.
+- The current runtime is one OpenVPN instance per container. The UI represents the instance as `default`; Docker Compose owns the container lifecycle, while the persistent internal controller owns the OpenVPN/OAuth2 child-process lifecycle. The Web UI may start, stop, restart, and reload the child processes without terminating PID 1 or the administration console.
 - Connection and traffic audit, certificates, client profiles, local documentation, GeoIP settings, and branding follow the full interface system below.
 - Multi-instance creation, instance lock protection, and LDAP-specific fields remain reference patterns for repositories that actually provide those server capabilities; they are not simulated here.
 
@@ -98,7 +98,8 @@ Blue is reserved for commands, focus, and selected navigation. Green, orange, an
 - `12px` radius, quiet border, and standard panel shadow.
 - Panel header uses `16px 20px` padding and at least `76px` height.
 - Instance cards may rotate blue, sky, and mint backgrounds to distinguish tunnels without introducing new accents.
-- Instance rows place the configuration workflow on a full-width secondary row in this order: service, certificate, client, export. Lifecycle controls remain a separate group.
+- Instance rows place the configuration workflow on a full-width secondary row in this order: VPN service configuration, identity source configuration, certificate material, client profile. Lifecycle controls remain a separate group.
+- VPN service configuration and identity source configuration belong to the VPN instance context, never the system-settings workspace. Each opens a native dialog; service configuration owns endpoint, tunnel, address-pool, NAT, routing, and IPv6 fields, while identity source owns OAuth2 provider, callback, client credentials, and management secrets.
 - Runtime failures use an inline peach diagnostic area with a concise cause and expandable OpenVPN log tail; long failures must not rely on toast feedback alone.
 
 ### Tunnel signal strip
@@ -115,6 +116,8 @@ Blue is reserved for commands, focus, and selected navigation. Green, orange, an
 - Select menu: fixed-position white raised surface, `8px` radius, `4px` inner padding, quiet border, and subtle shadow. Options are at least `36px` high; hover uses raised warm-gray, while the selected option uses pale blue with dark-blue text and a checkmark. Support click-outside close, Escape, Enter/Space, arrow navigation, and viewport-aware above/below placement.
 - At `760px` and below, filter bars containing selects use a one-column layout; controls fill the available width and must not cause horizontal scrolling.
 - Dialog: `16px` radius, `32px` viewport gutter, sticky action row on mobile.
+- Instance configuration dialogs use the shared form controls. The VPN service dialog may expand to `760px`; group service endpoint and routing/IPv6 fields with quiet fieldsets, and keep the action row visible within the viewport.
+- Start, stop, restart, and reload always use the shared confirmation dialog. The dialog names the target instance, explains session impact, and changes the final action to destructive red only for stop.
 - Desktop form fields may use two columns; collapse to one below `760px`.
 - File upload, routing, certificate, and OAuth2 controls reuse the same input/focus tokens.
 - Client configuration separates TLS certificate validation, OAuth2 identity authentication, and traffic rules into distinct fieldsets.
@@ -126,7 +129,7 @@ Blue is reserved for commands, focus, and selected navigation. Green, orange, an
 - Never rely on color alone; always keep the state label.
 - Success uses green/mint, warning uses orange/peach, destructive uses red.
 - Global toast feedback uses a manual popover so it remains above modal dialog backdrops; keep it fixed to the lower-right viewport gutter.
-- Instance lock: selected instance rows expose bulk lock/unlock controls in a quiet raised action bar. A locked row shows a compact neutral `锁定保护` badge, keeps an explicit `解锁` control, and disables stop, restart, and delete with a clear explanation. Protection must also be enforced by the server, not only by disabled controls.
+- Instance lock: the instance heading exposes one explicit lock/unlock control. A locked instance shows a compact neutral `锁定保护` badge and disables service configuration, identity-source configuration, start, stop, restart, and reload with a clear explanation. Protection must also be enforced by the server with a locked response, not only by disabled controls.
 
 ### Traffic geography
 
@@ -157,7 +160,7 @@ Blue is reserved for commands, focus, and selected navigation. Green, orange, an
 ### System settings workspace
 
 - Navigation places `系统设置` immediately before branding. Its focal element is a compact configuration-policy panel explaining what is Web-managed, what is encrypted, and which changes require a container restart.
-- Configuration is divided into OpenVPN service, routing/IPv6, OAuth2 authentication, runtime policy, and console security panels. Never expose LDAP fields.
+- Configuration is limited to cross-instance runtime policy, audit behavior, and console security. OpenVPN service, routing/IPv6, and OAuth2 identity-source fields live in the VPN instance dialogs. Never expose LDAP fields.
 - Reuse the shared two-column form grid, accessible custom selects, and switch-row pattern. Below 1050px the panels become one column; below 760px every field becomes one column.
 - Each panel carries an explicit `即时生效` or `重启后生效` badge. A sticky save bar summarizes unsaved state and the resulting activation boundary.
 - OAuth2 Client Secret and HTTP session Secret use password inputs with “leave blank to retain” behavior. The API returns only configured/unconfigured state. Persistent secrets are AES-256 encrypted using the container-provided root key.
@@ -192,10 +195,10 @@ Blue is reserved for commands, focus, and selected navigation. Green, orange, an
 
 ### VPN instance management
 
-- Primary task: create, edit, start, stop, restart, lock, unlock, and delete OpenVPN instances safely.
+- Primary task: configure, start, stop, restart, reload, lock, and unlock the `default` OpenVPN instance safely.
 - List rows expose service state, address pool, protocol/port, online count, certificate readiness, and lifecycle actions. Keep configuration and destructive lifecycle controls visually separate.
-- Bulk selection supplies a quiet action bar for lock/unlock. A locked instance has an explicit protection badge and server-enforced disabled stop/restart/delete actions.
-- Instance configuration separates identity/address pool, OAuth2 service behavior, certificates, and client traffic routing. It uses two-column desktop fields and one-column mobile fields.
+- The heading supplies a quiet lock/unlock control. A locked instance has an explicit protection badge and server-enforced disabled configuration and lifecycle actions.
+- Instance configuration is split into two entry points: VPN service configuration for endpoint/network/routing, and identity source configuration for OAuth2. Both use two-column desktop fields and one-column mobile fields.
 - Client-profile dialog exposes endpoint, VPN network, certificate posture, generated `.ovpn` export, full-tunnel routing, DNS, VPN routes, IPv6 routes, and bypass routes. Routing lists use indexed, editable rows and compact remove controls.
 
 ### Connection audit
@@ -209,8 +212,10 @@ Blue is reserved for commands, focus, and selected navigation. Green, orange, an
 
 - The operations console is the persistent control plane; stopping the VPN data plane must never make the console unavailable.
 - The instance page shows one authoritative textual state: running, starting, stopping, stopped, failed, or controller unavailable.
-- Lifecycle controls are grouped in a dedicated neutral strip below the instance identity. Order is start, restart, stop; stop uses the outlined danger treatment.
+- Lifecycle controls are grouped in a dedicated neutral strip below the instance identity. Order is start, restart, reload, stop; stop uses the outlined danger treatment.
 - Start is disabled while running/starting. Stop is disabled while stopped/stopping. Restart and stop warn that active VPN sessions will disconnect.
+- Reload is available only while running and signals the OpenVPN process without stopping the OAuth2 child process or administration console.
+- Every lifecycle action requires the shared confirmation dialog before the request is sent.
 - A stopped instance uses neutral gray rather than red. Red is reserved for a failed instance or unavailable controller.
 - Supporting copy must state that stop affects only OpenVPN/OAuth2 child processes and that the Web console remains accessible.
 
