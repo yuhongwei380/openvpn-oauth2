@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+# Load Web-managed OpenVPN/OAuth2 settings before rendering service files.
+# The generated shell file is kept in /run and never written to the persistent volume.
+mkdir -p /run/openvpn
+python3 /opt/openvpn-admin/runtime_config.py export-shell > /run/openvpn/runtime-settings.env
+. /run/openvpn/runtime-settings.env
+
 # ==============================================
 # 证书处理逻辑（自动生成或使用外部挂载）
 # ==============================================
@@ -36,16 +42,16 @@ echo "📝 生成配置文件..."
 # 处理IPv6相关变量（如果启用）
 if [ "$OVPN_IPV6_ENABLE" = "true" ]; then
   export OVPN_IPV6_CONFIG="server-ipv6 $OVPN_IPV6_NETWORK"
-  export OVPN_IPV6_ROUTE="push \"route-ipv6 $OVPN_IPV6_ROUTE\""
-  export OVPN_IPV6_DNS="push \"dhcp-option DNS $OVPN_DNS_IPV6\""
+  export OVPN_IPV6_ROUTE_PUSH="push \"route-ipv6 $OVPN_IPV6_ROUTE\""
+  export OVPN_IPV6_DNS_PUSH="push \"dhcp-option DNS $OVPN_DNS_IPV6\""
   export OVPN_IPV6_PUSH_SUBNET="push \"route-ipv6 $OVPN_IPV6_NETWORK\""
   export OVPN_IPV6_INTERNAL_ROUTES0="push \"route-ipv6 $OVPN_IPV6_INT_NETWORK0\""
   export OVPN_IPV6_INTERNAL_ROUTES1="push \"route-ipv6 $OVPN_IPV6_INT_NETWORK1\""
   export OVPN_IPV6_INTERNAL_ROUTES2="push \"route-ipv6 $OVPN_IPV6_INT_NETWORK2\""
 else
   export OVPN_IPV6_CONFIG=""
-  export OVPN_IPV6_ROUTE=""
-  export OVPN_IPV6_DNS=""
+  export OVPN_IPV6_ROUTE_PUSH=""
+  export OVPN_IPV6_DNS_PUSH=""
   export OVPN_IPV6_PUSH_SUBNET=""
   export OVPN_IPV6_INTERNAL_ROUTES0=""
   export OVPN_IPV6_INTERNAL_ROUTES1=""
@@ -53,29 +59,23 @@ else
 fi
 
 # 渲染OpenVPN配置
-envsubst '$OVPN_PORT $OVPN_PROTO $OVPN_DEV $OVPN_CA_CERT $OVPN_SERVER_CERT $OVPN_SERVER_KEY $OVPN_DH_PEM $OVPN_NETWORK $OVPN_NETMASK $OVPN_DNS_IPV4 $OVPN_IPV6_CONFIG $OVPN_IPV6_ROUTE $OVPN_IPV6_DNS $OVPN_CIPHER $OVPN_IPV6_PUSH_SUBNET $OVPN_IPV6_INTERNAL_ROUTES0 $OVPN_IPV6_INTERNAL_ROUTES1 $OVPN_IPV6_INTERNAL_ROUTES2' < /etc/openvpn/server.conf.template > /etc/openvpn/server.conf
+envsubst '$OVPN_PORT $OVPN_PROTO $OVPN_DEV $OVPN_CA_CERT $OVPN_SERVER_CERT $OVPN_SERVER_KEY $OVPN_DH_PEM $OVPN_NETWORK $OVPN_NETMASK $OVPN_DNS_IPV4 $OVPN_IPV6_CONFIG $OVPN_IPV6_ROUTE_PUSH $OVPN_IPV6_DNS_PUSH $OVPN_CIPHER $OVPN_IPV6_PUSH_SUBNET $OVPN_IPV6_INTERNAL_ROUTES0 $OVPN_IPV6_INTERNAL_ROUTES1 $OVPN_IPV6_INTERNAL_ROUTES2' < /etc/openvpn/server.conf.template > /etc/openvpn/server.conf
 
 # ==============================================
-# OAuth2 配置文件生成
+# OAuth2 运行环境
 # ==============================================
-echo "🔐 生成 OAuth2 配置文件..."
+# openvpn-auth-oauth2 supports CONFIG_* environment variables. Keeping the
+# decrypted values in process memory avoids writing plaintext secrets to disk.
+export CONFIG_OAUTH2_ISSUER="${OAUTH2_ISSUER}"
+export CONFIG_OAUTH2_CLIENT_ID="${OAUTH2_CLIENT_ID}"
+export CONFIG_OAUTH2_CLIENT_SECRET="${OAUTH2_CLIENT_SECRET}"
+export CONFIG_HTTP_SECRET="${OAUTH2_HTTP_SECRET}"
+export CONFIG_HTTP_BASEURL="${OAUTH2_HTTP_BASEURL}"
+export CONFIG_HTTP_LISTEN="${OAUTH2_HTTP_LISTEN:-":9000"}"
+export CONFIG_OPENVPN_ADDR="${OAUTH2_OPENVPN_ADDR:-"unix:///run/openvpn/server.sock"}"
+export CONFIG_OPENVPN_PASSWORD="${OAUTH2_OPENVPN_PASSWORD:-"admin"}"
 
-# 创建 sysconfig 目录
-mkdir -p /etc/sysconfig
-
-# 生成 OAuth2 配置文件
-cat <<EOF > /etc/sysconfig/openvpn-auth-oauth2
-CONFIG_OAUTH2_ISSUER=${OAUTH2_ISSUER:-"https://login.microsoftonline.com/<tenant-id>/v2.0"}
-CONFIG_OAUTH2_CLIENT_ID=${OAUTH2_CLIENT_ID}
-CONFIG_OAUTH2_CLIENT_SECRET=${OAUTH2_CLIENT_SECRET}
-CONFIG_HTTP_SECRET=${OAUTH2_HTTP_SECRET}
-CONFIG_HTTP_BASEURL=${OAUTH2_HTTP_BASEURL}
-CONFIG_HTTP_LISTEN=${OAUTH2_HTTP_LISTEN:-":9000"}
-CONFIG_OPENVPN_ADDR=${OAUTH2_OPENVPN_ADDR:-"unix:///run/openvpn/server.sock"}
-CONFIG_OPENVPN_PASSWORD=${OAUTH2_OPENVPN_PASSWORD:-"admin"}
-EOF
-
-echo "✅ OAuth2 配置文件生成完成"
+echo "✅ OAuth2 运行配置已就绪"
 
 # ==============================================
 # 网络配置（IPv4/IPv6 NAT和转发）
@@ -88,16 +88,21 @@ sysctl -w net.ipv4.ip_forward=1
 
 # IPv4 NAT规则
 if [ "$ENABLE_IPV4_NAT" = "true" ]; then
-  iptables -t nat -A POSTROUTING -s "$OVPN_NETWORK/$OVPN_NETMASK" -o eth0 -j MASQUERADE
+  iptables -t nat -A POSTROUTING -s "$OVPN_NETWORK/$OVPN_NETMASK" -o "$NAT_OUTBOUND_INTERFACE" -j MASQUERADE
   iptables -A FORWARD -d "$OVPN_NETWORK/$OVPN_NETMASK" -j ACCEPT
   iptables -A FORWARD -s "$OVPN_NETWORK/$OVPN_NETMASK" -j ACCEPT
-  iptables -A INPUT -p "$OVPN_PROTO" --dport "$OVPN_PORT" -j ACCEPT
+  if [ "$OVPN_PROTO" = "tcp-server" ]; then
+    FIREWALL_PROTO=tcp
+  else
+    FIREWALL_PROTO=udp
+  fi
+  iptables -A INPUT -p "$FIREWALL_PROTO" --dport "$OVPN_PORT" -j ACCEPT
   echo "🔗 已启用IPv4 NAT规则"
 fi
 
 # IPv6 NAT规则（如果启用IPv6）
 if [ "$OVPN_IPV6_ENABLE" = "true" ] && [ "$ENABLE_IPV6_NAT" = "true" ]; then
-  ip6tables -t nat -A POSTROUTING -s "$OVPN_IPV6_NETWORK" -o eth0 -j MASQUERADE
+  ip6tables -t nat -A POSTROUTING -s "$OVPN_IPV6_NETWORK" -o "$NAT_OUTBOUND_INTERFACE" -j MASQUERADE
   ip6tables -A FORWARD -d "$OVPN_IPV6_NETWORK" -j ACCEPT
   ip6tables -A FORWARD -s "$OVPN_IPV6_NETWORK" -j ACCEPT
   
@@ -129,7 +134,7 @@ if [ "$GENERATE_DEFAULT_CLIENT_CONFIG" = "true" ]; then
     /usr/local/bin/generate-client-config.sh default-client
 fi
 
-echo "admin" | tee /etc/openvpn/management-password.txt
+printf '%s\n' "$OAUTH2_OPENVPN_PASSWORD" > /etc/openvpn/management-password.txt
 chmod 600 /etc/openvpn/management-password.txt
 chown root:root /etc/openvpn/management-password.txt
 
@@ -143,7 +148,11 @@ mkdir -p /run/openvpn
 
 # 启动 OAuth2 认证服务（后台运行）
 echo "🚀 启动 OAuth2 认证服务..."
-/usr/local/bin/openvpn-auth-oauth2 --config /etc/sysconfig/openvpn-auth-oauth2 &
+/usr/local/bin/openvpn-auth-oauth2 &
+
+# Web 管理控制台是运行配置的唯一管理入口，始终随服务启动。
+echo "Starting OpenVPN Web UI on ${WEB_UI_LISTEN:-0.0.0.0:8080}..."
+python3 /opt/openvpn-admin/server.py &
 
 # 等待一下让 OAuth2 服务启动
 sleep 3

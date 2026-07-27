@@ -1,48 +1,29 @@
-version: '3.8'
-
 services:
   openvpn:
+    build:
+      context: .
     image: yuhongwei1997/openvpn-oauth2:v2.0
     container_name: openvpn-oauth2
     restart: unless-stopped
     cap_add:
       - NET_ADMIN
-    ports:
-      - "${OVPN_PORT}:${OVPN_PORT}/udp"
-      - "5555:5555"
-    env_file:
-      - .env
+    environment:
+      # Only bootstrap secrets remain outside the Web UI.
+      CONFIG_ENCRYPTION_KEY: "${CONFIG_ENCRYPTION_KEY:-}"
+      WEB_UI_PASSWORD: "${WEB_UI_BOOTSTRAP_PASSWORD:-admin}"
+      WEB_UI_USERNAME: "admin"
+      WEB_UI_LISTEN: "0.0.0.0:8080"
+      WEB_UI_DATABASE_PATH: "/etc/openvpn/admin/admin.db"
+      OPENVPN_RUNTIME_SETTINGS_PATH: "/etc/openvpn/admin/runtime-settings.json"
+      GEOIP_DATABASE_PATH: "/geoip/Country.mmdb"
     volumes:
       - ./certs:/etc/openvpn/certs
-      - ./openvpn-auth-oauth2-config.yaml:/app/config.yaml
+      - ./admin-data:/etc/openvpn/admin
+      - ./geoip:/geoip
     privileged: true
-    network_mode: "host"  # 使用host网络
+    network_mode: "host"
     healthcheck:
-      test: ["CMD", "pgrep", "openvpn"]
+      test: ["CMD-SHELL", "pgrep openvpn >/dev/null && curl -fsS http://127.0.0.1:8080/api/health >/dev/null"]
       interval: 30s
       timeout: 10s
       retries: 3
-      
-  openvpn-monitor:
-    image: ruimarinho/openvpn-monitor
-    container_name: openvpn-monitor
-    ports:
-      - "80:80"
-    environment:
-      # 默认设置
-      - OPENVPNMONITOR_DEFAULT_DATETIMEFORMAT=%%d/%%m/%%Y
-      - OPENVPNMONITOR_DEFAULT_SITE=OpenVPN Server
-
-      # UDP 站点配置（包含密码）
-      - OPENVPNMONITOR_SITES_0_ALIAS=Default Server
-      - OPENVPNMONITOR_SITES_0_HOST=127.0.0.1  # 替换为你的 OpenVPN 主机IP或容器名,已采用host网络模式，可不用修改
-      - OPENVPNMONITOR_SITES_0_NAME=Default Server
-      - OPENVPNMONITOR_SITES_0_PORT=5555
-      - OPENVPNMONITOR_SITES_0_SHOWDISCONNECT=True
-      - OPENVPNMONITOR_SITES_0_PASSWORD=admin  # 管理密码
-    network_mode: "host"
-    restart: unless-stopped
-
-
-volumes:
-  certs:

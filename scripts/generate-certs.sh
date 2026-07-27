@@ -116,10 +116,6 @@ else
     find "$EASYRSA_PKI" -type f 2>/dev/null || echo "PKI directory not found"
 fi
 
-cp /etc/openvpn/certs/pki/ca.crt /etc/openvpn/certs/ca.crt
-cp /etc/openvpn/certs/pki/issued/server.crt /etc/openvpn/certs/server.crt
-cp /etc/openvpn/certs/pki/private/server.key /etc/openvpn/certs/server.key
-
 # 设置最终权限
 chmod 600 "$CERT_DIR/"*.key 2>/dev/null || true
 chmod 644 "$CERT_DIR/"*.crt "$CERT_DIR/"*.pem 2>/dev/null || true

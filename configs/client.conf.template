@@ -1,13 +1,14 @@
 client
 dev tun
-proto ${OVPN_PROTO}
+proto ${OVPN_CLIENT_PROTO}
 remote ${OVPN_REMOTE_HOST} ${OVPN_PORT}
 
 # 用户认证
 auth-user-pass
+setenv IV_SSO webauth
 
 # 加密配置
-cipher AES-256-GCM
+data-ciphers ${OVPN_CIPHER}
 auth SHA256
 
 # 网络配置

@@ -15,20 +15,29 @@ push "dhcp-option DNS ${OVPN_DNS_IPV4}"
 
 # IPv6 配置（仅在启用时生效）
 ${OVPN_IPV6_CONFIG}
-${OVPN_IPV6_ROUTE}
-${OVPN_IPV6_DNS}
+${OVPN_IPV6_ROUTE_PUSH}
+${OVPN_IPV6_DNS_PUSH}
+${OVPN_IPV6_INTERNAL_ROUTES0}
+${OVPN_IPV6_INTERNAL_ROUTES1}
+${OVPN_IPV6_INTERNAL_ROUTES2}
 
 
 verify-client-cert none
 username-as-common-name
+management /run/openvpn/server.sock unix /etc/openvpn/management-password.txt
+management-client-auth
+auth-user-pass-optional
+auth-gen-token 28800 external-auth
 
 # 其他配置
 keepalive 10 120
 persist-key
 persist-tun
-status openvpn-status.log
+status /run/openvpn/openvpn-status.log 10
+status-version 3
 verb 3
 
 # 安全增强
 tls-version-min 1.2
 tls-cipher TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384
+data-ciphers ${OVPN_CIPHER}

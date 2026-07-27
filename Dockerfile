@@ -1,7 +1,8 @@
 FROM ubuntu:24.04
 
 # 设置非交互模式，避免 tzdata 配置时的交互提示
-ENV TZ=Asia/Shanghai
+ENV TZ=Asia/Shanghai \
+    DEBIAN_FRONTEND=noninteractive
 
 # 可选：验证时区
 RUN date
@@ -15,11 +16,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iproute2 \
     iputils-ping \
     tcpdump \
+    tshark \
     traceroute \
     vim \
     curl \
     gnupg \
     wget \
+    python3 \
+    python3-maxminddb \
     ca-certificates  # 确保安装 ca-certificates
 
 
@@ -48,14 +52,20 @@ COPY configs/client.conf.template /etc/openvpn/
 # 证书生成脚本
 COPY scripts/generate-certs.sh /usr/local/bin/
 COPY scripts/generate-client-config.sh /usr/local/bin/
+COPY admin /opt/openvpn-admin
+COPY ReadME.md /opt/openvpn-admin/README.md
 
 # 设置权限
-RUN chmod +x /usr/local/bin/entrypoint.sh \
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh \
+    /usr/local/bin/generate-certs.sh \
+    /usr/local/bin/generate-client-config.sh \
+    && chmod +x /usr/local/bin/entrypoint.sh \
     && chmod +x /usr/local/bin/generate-certs.sh \
     && chmod +x /usr/local/bin/generate-client-config.sh
 
 # 开放VPN端口
 EXPOSE 1194/udp
+EXPOSE 8080/tcp
 
 # 持久化存储
 VOLUME ["/etc/openvpn/certs"]

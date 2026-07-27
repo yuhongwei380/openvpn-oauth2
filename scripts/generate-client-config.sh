@@ -20,8 +20,13 @@ else
 fi
 
 # 设置环境变量
-export OVPN_PROTO=${OVPN_PROTO:-udp}
+if [ "${OVPN_PROTO:-udp}" = "tcp-server" ]; then
+    export OVPN_CLIENT_PROTO=tcp-client
+else
+    export OVPN_CLIENT_PROTO=udp
+fi
 export OVPN_PORT=${OVPN_PORT:-1194}
+export OVPN_CIPHER=${OVPN_CIPHER:-AES-256-GCM}
 export OVPN_REMOTE_HOST=${OVPN_REMOTE_HOST}
 export OVPN_DNS_IPV4=${OVPN_DNS_IPV4:-8.8.8.8}
 
@@ -33,8 +38,8 @@ else
 fi
 
 # 生成客户端配置文件
-envsubst '$OVPN_PROTO $OVPN_PORT $OVPN_REMOTE_HOST $OVPN_DNS_IPV4 $OVPN_DNS_IPV6_CONFIG $CA_CERT_CONTENT' < /etc/openvpn/client.conf.template > "$OUTPUT_DIR/$CLIENT_NAME.ovpn"
+envsubst '$OVPN_CLIENT_PROTO $OVPN_PORT $OVPN_REMOTE_HOST $OVPN_DNS_IPV4 $OVPN_DNS_IPV6_CONFIG $OVPN_CIPHER $CA_CERT_CONTENT' < /etc/openvpn/client.conf.template > "$OUTPUT_DIR/$CLIENT_NAME.ovpn"
 
 echo "✅ 客户端配置已生成: $OUTPUT_DIR/$CLIENT_NAME.ovpn"
 echo "📋 使用方法:"
-echo "   docker cp openvpn-ldap:/etc/openvpn/client-configs/$CLIENT_NAME.ovpn ./"
+echo "   docker cp openvpn-oauth2:/etc/openvpn/client-configs/$CLIENT_NAME.ovpn ./"

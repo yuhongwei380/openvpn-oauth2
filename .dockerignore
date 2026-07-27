@@ -1,0 +1,13 @@
+.git
+.gitignore
+.env
+.env.*
+__pycache__
+*.pyc
+tests
+test-screenshots
+admin-data
+geoip
+certs
+*.tar
+*.log
