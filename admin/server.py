@@ -15,10 +15,12 @@ import re
 import secrets
 import subprocess
 import tempfile
+import threading
 import time
 import hashlib
 from datetime import datetime, timezone
 from http import HTTPStatus
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -27,6 +29,7 @@ import geoip_service
 import monitors
 import runtime_config
 import storage
+import vpn_control_client
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -39,6 +42,13 @@ CERT_DIR = Path(os.getenv("OPENVPN_CERT_DIR", "/etc/openvpn/certs"))
 DOC_PATH = Path(os.getenv("WEB_UI_DOCUMENT_PATH", "/opt/openvpn-admin/README.md"))
 TRAFFIC_MONITOR = None
 GEOIP = None
+SESSION_COOKIE = "openvpn_admin_session"
+SESSION_TTL_SECONDS = 12 * 60 * 60
+LOGIN_WINDOW_SECONDS = 5 * 60
+LOGIN_MAX_ATTEMPTS = 5
+_SESSIONS: dict[str, dict] = {}
+_LOGIN_ATTEMPTS: dict[str, list[float]] = {}
+_AUTH_LOCK = threading.RLock()
 
 
 def _number(value: str) -> int:
@@ -328,6 +338,72 @@ def settings_payload() -> dict:
     }
 
 
+def create_session(username: str, now: float | None = None) -> str:
+    now = time.time() if now is None else now
+    token = secrets.token_urlsafe(32)
+    with _AUTH_LOCK:
+        _SESSIONS[token] = {
+            "username": username,
+            "createdAt": now,
+            "expiresAt": now + SESSION_TTL_SECONDS,
+        }
+    return token
+
+
+def session_value(token: str, now: float | None = None) -> dict | None:
+    if not token:
+        return None
+    now = time.time() if now is None else now
+    with _AUTH_LOCK:
+        expired = [
+            key for key, value in _SESSIONS.items()
+            if value.get("expiresAt", 0) <= now
+        ]
+        for key in expired:
+            _SESSIONS.pop(key, None)
+        value = _SESSIONS.get(token)
+        return dict(value) if value else None
+
+
+def invalidate_sessions() -> None:
+    with _AUTH_LOCK:
+        _SESSIONS.clear()
+
+
+def credentials_match(username: str, password: str) -> bool:
+    settings = security_settings()
+    if not hmac.compare_digest(username, settings["username"]):
+        return False
+    if settings.get("passwordHash"):
+        return _password_matches(password, settings["passwordHash"])
+    return hmac.compare_digest(password, os.getenv("WEB_UI_PASSWORD", "admin"))
+
+
+def login_blocked(address: str, now: float | None = None) -> tuple[bool, int]:
+    now = time.time() if now is None else now
+    with _AUTH_LOCK:
+        recent = [
+            value for value in _LOGIN_ATTEMPTS.get(address, [])
+            if now - value < LOGIN_WINDOW_SECONDS
+        ]
+        _LOGIN_ATTEMPTS[address] = recent
+        if len(recent) < LOGIN_MAX_ATTEMPTS:
+            return False, 0
+        retry = max(1, int(LOGIN_WINDOW_SECONDS - (now - recent[0])))
+        return True, retry
+
+
+def record_login_failure(address: str, now: float | None = None) -> None:
+    now = time.time() if now is None else now
+    with _AUTH_LOCK:
+        _LOGIN_ATTEMPTS.setdefault(address, []).append(now)
+
+
+def clear_login_failures(address: str) -> None:
+    with _AUTH_LOCK:
+        _LOGIN_ATTEMPTS.pop(address, None)
+
+
 def query_since(query: dict) -> int:
     range_value = (query.get("range") or ["24h"])[0]
     seconds = {"1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800, "30d": 2592000}.get(range_value, 86400)
@@ -340,39 +416,44 @@ class AdminHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         print(f"[web-ui] {self.address_string()} {fmt % args}", flush=True)
 
-    def _authenticated(self) -> bool:
-        settings = security_settings()
-        expected_user = settings["username"]
-        header = self.headers.get("Authorization", "")
-        if not header.startswith("Basic "):
-            return False
+    def _session_token(self) -> str:
         try:
-            raw = base64.b64decode(header[6:], validate=True).decode("utf-8")
-            username, password = raw.split(":", 1)
-        except (ValueError, UnicodeDecodeError):
-            return False
-        if not hmac.compare_digest(username, expected_user):
-            return False
-        if settings.get("passwordHash"):
-            return _password_matches(password, settings["passwordHash"])
-        return hmac.compare_digest(password, os.getenv("WEB_UI_PASSWORD", "admin"))
+            cookies = SimpleCookie(self.headers.get("Cookie", ""))
+            return cookies.get(SESSION_COOKIE).value if cookies.get(SESSION_COOKIE) else ""
+        except (AttributeError, KeyError):
+            return ""
 
-    def _require_auth(self) -> bool:
+    def _session(self) -> dict | None:
+        return session_value(self._session_token())
+
+    def _require_auth(self, route: str) -> bool:
         auth_enabled = security_settings()["authEnabled"]
-        if not auth_enabled or self.path == "/api/health" or self._authenticated():
+        if not auth_enabled or route == "/api/health" or self._session():
             return True
-        self.send_response(HTTPStatus.UNAUTHORIZED)
-        self.send_header("WWW-Authenticate", 'Basic realm="OpenVPN Control Center"')
+        if route.startswith("/api/"):
+            self._json({"error": "登录已过期，请重新登录"}, HTTPStatus.UNAUTHORIZED)
+            return False
+        next_path = route if route.startswith("/") and not route.startswith("//") else "/"
+        self.send_response(HTTPStatus.SEE_OTHER)
+        self.send_header("Location", f"/login?next={next_path}")
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", "0")
         self.end_headers()
         return False
 
-    def _json(self, payload: object, status: HTTPStatus = HTTPStatus.OK) -> None:
+    def _json(
+        self,
+        payload: object,
+        status: HTTPStatus = HTTPStatus.OK,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -397,18 +478,41 @@ class AdminHandler(BaseHTTPRequestHandler):
         return json.loads(self.rfile.read(length).decode("utf-8"))
 
     def do_GET(self) -> None:
-        if not self._require_auth():
-            return
         parsed_url = urlparse(self.path)
         route = parsed_url.path
         query = parse_qs(parsed_url.query)
+        if route in ("/login", "/login.html"):
+            if not security_settings()["authEnabled"] or self._session():
+                self.send_response(HTTPStatus.SEE_OTHER)
+                self.send_header("Location", "/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            else:
+                self._serve_static("/login.html")
+            return
+        if route in ("/login.css", "/login.js"):
+            self._serve_static(route)
+            return
+        if route == "/api/auth/session":
+            session = self._session()
+            auth_enabled = security_settings()["authEnabled"]
+            self._json({
+                "authenticated": bool(session) or not auth_enabled,
+                "authEnabled": auth_enabled,
+                "username": session.get("username", "") if session else "",
+            })
+            return
+        if not self._require_auth(route):
+            return
         if route == "/api/health":
             self._json({"ok": True})
         elif route == "/api/status":
             status = read_status()
+            instance = vpn_control_client.request()
             self._json(
                 {
-                    "service": "online",
+                    "service": instance.get("state", "unknown"),
+                    "controller": instance,
                     "uptimeSeconds": int(time.time() - STARTED_AT),
                     "connections": len(status["clients"]),
                     "bytesReceived": sum(item["bytesReceived"] for item in status["clients"]),
@@ -423,15 +527,18 @@ class AdminHandler(BaseHTTPRequestHandler):
             self._json({"profiles": list_profiles()})
         elif route == "/api/instance":
             current = read_status()
+            control = vpn_control_client.request()
             self._json({
                 "name": "default",
-                "state": "running",
+                "state": control.get("state", "unknown"),
+                "desiredState": control.get("desiredState", "unknown"),
                 "locked": False,
                 "online": len(current["clients"]),
                 "statusAvailable": current["available"],
                 "config": public_config()["server"],
                 "certificate": certificate_status()[0],
-                "management": "container",
+                "management": "internal-control-api",
+                "controller": control,
             })
         elif route == "/api/audit/connections":
             events = storage.query_connection_events(
@@ -509,9 +616,44 @@ class AdminHandler(BaseHTTPRequestHandler):
             self._serve_static(route)
 
     def do_POST(self) -> None:
-        if not self._require_auth():
-            return
         route = urlparse(self.path).path
+        if route == "/api/auth/login":
+            self._login()
+            return
+        if not self._require_auth(route):
+            return
+        if route == "/api/auth/logout":
+            token = self._session_token()
+            with _AUTH_LOCK:
+                _SESSIONS.pop(token, None)
+            self._json(
+                {"ok": True},
+                headers={
+                    "Set-Cookie": (
+                        f"{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; "
+                        "Max-Age=0"
+                    )
+                },
+            )
+            return
+        if route in (
+            "/api/instance/start",
+            "/api/instance/stop",
+            "/api/instance/restart",
+        ):
+            action = route.rsplit("/", 1)[-1]
+            result = vpn_control_client.request(action)
+            if result.get("controller") == "unavailable":
+                self._json(
+                    {
+                        "error": "VPN 实例控制服务当前不可用",
+                        "controller": result,
+                    },
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+            else:
+                self._json({"instance": result})
+            return
         if route != "/api/profiles":
             self._json({"error": "接口不存在"}, HTTPStatus.NOT_FOUND)
             return
@@ -538,9 +680,9 @@ class AdminHandler(BaseHTTPRequestHandler):
             self._json({"error": f"生成客户端配置失败：{exc}"}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
     def do_PUT(self) -> None:
-        if not self._require_auth():
-            return
         route = urlparse(self.path).path
+        if not self._require_auth(route):
+            return
         try:
             payload = self._read_json(3 * 1024 * 1024 if route == "/api/certificates/default" else 16_384)
             if route == "/api/geoip":
@@ -565,6 +707,7 @@ class AdminHandler(BaseHTTPRequestHandler):
                 if TRAFFIC_MONITOR:
                     TRAFFIC_MONITOR.configure(audit["trafficEnabled"])
                 console = save_security_settings(payload.get("console") or {})
+                invalidate_sessions()
                 self._json({
                     "runtime": runtime,
                     "audit": audit,
@@ -577,6 +720,40 @@ class AdminHandler(BaseHTTPRequestHandler):
                 self._json({"error": "接口不存在"}, HTTPStatus.NOT_FOUND)
         except (ValueError, json.JSONDecodeError) as exc:
             self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+
+    def _login(self) -> None:
+        address = self.client_address[0]
+        blocked, retry_after = login_blocked(address)
+        if blocked:
+            self._json(
+                {"error": f"登录尝试过多，请在 {retry_after} 秒后重试"},
+                HTTPStatus.TOO_MANY_REQUESTS,
+                {"Retry-After": str(retry_after)},
+            )
+            return
+        try:
+            payload = self._read_json(4096)
+            username = str(payload.get("username", "")).strip()
+            password = str(payload.get("password", ""))
+        except (ValueError, json.JSONDecodeError):
+            self._json({"error": "登录请求无效"}, HTTPStatus.BAD_REQUEST)
+            return
+        if not credentials_match(username, password):
+            record_login_failure(address)
+            self._json({"error": "账号或密码不正确"}, HTTPStatus.UNAUTHORIZED)
+            return
+        clear_login_failures(address)
+        token = create_session(username)
+        cookie = (
+            f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; "
+            f"Max-Age={SESSION_TTL_SECONDS}"
+        )
+        if self.headers.get("X-Forwarded-Proto", "").lower() == "https":
+            cookie += "; Secure"
+        self._json(
+            {"ok": True, "username": username, "expiresIn": SESSION_TTL_SECONDS},
+            headers={"Set-Cookie": cookie},
+        )
 
     def _download_profile(self, filename: str) -> None:
         if not filename.endswith(".ovpn") or not CLIENT_NAME_RE.fullmatch(filename[:-5]):

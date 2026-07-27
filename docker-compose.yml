@@ -2,28 +2,69 @@ services:
   openvpn:
     build:
       context: .
-    image: yuhongwei1997/openvpn-oauth2:v2.0
+      dockerfile: Dockerfile
+    image: yuhongwei1997/vpn/openvpn-oauth2:v2.0
     container_name: openvpn-oauth2
     restart: unless-stopped
+    privileged: true
+    network_mode: "host"
+    environment:
+      CONFIG_ENCRYPTION_KEY: "${CONFIG_ENCRYPTION_KEY:-development-only-change-me}"
+      OPENVPN_CONTROL_TOKEN: "${CONFIG_ENCRYPTION_KEY:-development-only-change-me}"
+      OPENVPN_CONTROL_LISTEN_HOST: "127.0.0.1"
+      OPENVPN_CONTROL_LISTEN_PORT: "9090"
+      OPENVPN_AUTOSTART: "true"
+      OPENVPN_RUNTIME_SETTINGS_PATH: "/etc/openvpn/admin/runtime-settings.json"
+      OPENVPN_INSTANCE_STATE_PATH: "/etc/openvpn/admin/instance-state.json"
+    volumes:
+      - ./certs:/etc/openvpn/certs
+      - ./admin-data:/etc/openvpn/admin
+      - ./client-configs:/etc/openvpn/client-configs
+      - openvpn-runtime:/run/openvpn
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9090/health >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  vpn-admin:
+    build:
+      context: .
+      dockerfile: admin/Dockerfile
+    image: yuhongwei1997/vpn/openvpn-oauth2-admin:v2.0
+    container_name: openvpn-oauth2-admin
+    restart: unless-stopped
+    network_mode: "host"
     cap_add:
       - NET_ADMIN
+      - NET_RAW
     environment:
       # Only bootstrap secrets remain outside the Web UI.
-      CONFIG_ENCRYPTION_KEY: "${CONFIG_ENCRYPTION_KEY:-}"
+      CONFIG_ENCRYPTION_KEY: "${CONFIG_ENCRYPTION_KEY:-development-only-change-me}"
+      OPENVPN_CONTROL_TOKEN: "${CONFIG_ENCRYPTION_KEY:-development-only-change-me}"
+      OPENVPN_CONTROL_URL: "http://127.0.0.1:9090"
       WEB_UI_PASSWORD: "${WEB_UI_BOOTSTRAP_PASSWORD:-admin}"
       WEB_UI_USERNAME: "admin"
       WEB_UI_LISTEN: "0.0.0.0:8080"
       WEB_UI_DATABASE_PATH: "/etc/openvpn/admin/admin.db"
       OPENVPN_RUNTIME_SETTINGS_PATH: "/etc/openvpn/admin/runtime-settings.json"
+      OPENVPN_STATUS_PATH: "/run/openvpn/openvpn-status.log"
+      OPENVPN_CLIENT_CONFIG_DIR: "/etc/openvpn/client-configs"
+      OPENVPN_CERT_DIR: "/etc/openvpn/certs"
       GEOIP_DATABASE_PATH: "/geoip/Country.mmdb"
     volumes:
       - ./certs:/etc/openvpn/certs
       - ./admin-data:/etc/openvpn/admin
+      - ./client-configs:/etc/openvpn/client-configs
       - ./geoip:/geoip
-    privileged: true
-    network_mode: "host"
+      - openvpn-runtime:/run/openvpn
     healthcheck:
-      test: ["CMD-SHELL", "pgrep openvpn >/dev/null && curl -fsS http://127.0.0.1:8080/api/health >/dev/null"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/api/health >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  openvpn-runtime:

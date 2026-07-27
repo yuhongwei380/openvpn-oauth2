@@ -49,6 +49,11 @@ async function api(path, options = {}) {
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
   });
   const payload = await response.json().catch(() => ({}));
+  if (response.status === 401) {
+    const next = `${location.pathname}${location.hash}`;
+    location.replace(`/login?next=${encodeURIComponent(next)}`);
+    throw new Error("登录已过期");
+  }
   if (!response.ok) throw new Error(payload.error || `请求失败 (${response.status})`);
   return payload;
 }
@@ -142,6 +147,16 @@ async function loadConnectionAudit() {
 function renderStatus(payload) {
   state.status = payload;
   state.connections = payload.status.clients || [];
+  const instanceRunning = payload.service === "running";
+  const instanceChanging = ["starting", "stopping"].includes(payload.service);
+  const healthClass = instanceRunning ? "" : instanceChanging ? "starting" : payload.service === "stopped" ? "stopped" : "failed";
+  const healthText = instanceRunning ? "系统正常" : instanceChanging ? "实例状态变化中" : payload.service === "stopped" ? "VPN 实例已停止" : "VPN 控制异常";
+  $("#overviewHealth").className = `health-pill ${healthClass}`;
+  $("#overviewHealth").querySelector("b").textContent = healthText;
+  $("#sidebarService").classList.toggle("inactive", !instanceRunning);
+  $("#sidebarServiceState").textContent = instanceRunning ? "VPN 实例运行中" : "控制面在线";
+  $("#openvpnNodeState").textContent = instanceRunning ? "在线" : payload.service === "stopped" ? "已停止" : "异常";
+  $("#authProxyNodeState").textContent = instanceRunning ? "在线" : "未运行";
   $("#metricConnections").textContent = payload.connections;
   $("#metricReceived").textContent = formatBytes(payload.bytesReceived);
   $("#metricSent").textContent = formatBytes(payload.bytesSent);
@@ -158,9 +173,11 @@ function renderStatus(payload) {
   $("#protocolTag").textContent = String(server.protocol).toUpperCase();
   $("#profileHost").value ||= server.remoteHost;
   $("#oauthNodeState").textContent = oauth2.configured ? "已配置" : "待配置";
-  $("#tunnelDescription").textContent = oauth2.configured
-    ? "身份提供商、认证代理和 OpenVPN 服务正在协同工作。"
-    : "OpenVPN 已运行，但 OAuth2 参数尚未完整配置。";
+  $("#tunnelDescription").textContent = !instanceRunning
+    ? "运维面板保持在线；启动 OpenVPN 实例后，认证代理与 VPN 隧道会恢复工作。"
+    : oauth2.configured
+      ? "身份提供商、认证代理和 OpenVPN 服务正在协同工作。"
+      : "OpenVPN 已运行，但 OAuth2 参数尚未完整配置。";
   renderLivePreview();
 }
 
@@ -181,8 +198,35 @@ async function refreshStatus(showFeedback = false) {
 async function loadInstance() {
   try {
     const instance = await api("/api/instance");
+    const labels = {
+      running: "运行中",
+      stopped: "已停止",
+      starting: "启动中",
+      stopping: "停止中",
+      failed: "启动失败",
+      unknown: "控制服务不可用",
+    };
+    const stateName = labels[instance.state] || instance.state;
+    const stateClass = ["running", "stopped", "starting", "stopping", "failed"].includes(instance.state)
+      ? instance.state : "failed";
+    const health = $("#instanceHealth");
+    health.className = `health-pill ${stateClass}`;
+    health.querySelector("b").textContent = stateName;
+    const badge = $("#instanceStateBadge");
+    badge.className = `status-badge ${stateClass}`;
+    badge.textContent = stateName;
     $("#instanceOnline").innerHTML = `${instance.online} <small>在线</small>`;
     $("#instanceCertificateState").textContent = instance.certificate.ready ? "材料完整" : "材料不完整";
+    $("#instanceControlHint").textContent = instance.controller.controller === "unavailable"
+      ? "内部控制服务不可用，请检查 openvpn 服务容器"
+      : instance.state === "running"
+        ? `实例 PID ${instance.controller.pid || "—"} · 已运行 ${formatDuration(instance.controller.uptimeSeconds)}`
+        : instance.state === "stopped"
+          ? "运维面板保持在线，可随时重新启动实例"
+          : instance.controller.message || "实例状态正在变化";
+    $("#startInstance").disabled = ["running", "starting"].includes(instance.state);
+    $("#restartInstance").disabled = instance.controller.controller === "unavailable";
+    $("#stopInstance").disabled = ["stopped", "stopping", "unknown"].includes(instance.state);
     const config = instance.config;
     $("#instanceFacts").innerHTML = [
       ["服务端点", `${config.remoteHost || "未配置"}:${config.port}`],
@@ -192,6 +236,25 @@ async function loadInstance() {
     ].map(([label, value]) => `<div><span>${label}</span><strong title="${escapeHtml(value)}">${escapeHtml(value)}</strong></div>`).join("");
   } catch (error) {
     showToast(error.message);
+  }
+}
+
+async function controlInstance(action) {
+  const buttons = ["startInstance", "restartInstance", "stopInstance"].map((id) => $(`#${id}`));
+  buttons.forEach((button) => { button.disabled = true; });
+  try {
+    const payload = await api(`/api/instance/${action}`, {
+      method: "POST",
+      body: "{}",
+    });
+    const label = { start: "启动指令已发送", restart: "实例正在重启", stop: "实例已停止" }[action];
+    showToast(label);
+    await loadInstance();
+    await refreshStatus();
+    return payload;
+  } catch (error) {
+    showToast(error.message);
+    await loadInstance();
   }
 }
 
@@ -412,7 +475,7 @@ async function saveCertificates(event) {
     $("#certificateDialog").close();
     event.currentTarget.reset();
     await loadCertificates();
-    showToast("证书材料已更新；请重启 OpenVPN 容器使其生效");
+    showToast("证书材料已更新；请在 VPN 实例页面执行重启");
   } catch (error) {
     $("#certificateError").textContent = error.message;
   } finally {
@@ -650,8 +713,8 @@ async function saveSystemSettings(event) {
     });
     renderSystemSettings(result);
     $("#settingsSaveTitle").textContent = "设置已保存";
-    $("#settingsSaveHint").textContent = "审计与安全设置已应用；服务、网络和 OAuth2 参数需重启容器";
-    showToast("设置已安全保存；部分参数重启容器后生效");
+    $("#settingsSaveHint").textContent = "审计与安全设置已应用；服务、网络和 OAuth2 参数需重启 VPN 实例";
+    showToast("设置已安全保存；可前往 VPN 实例页面执行重启");
   } catch (error) {
     $("#settingsError").textContent = error.message;
   } finally {
@@ -740,6 +803,29 @@ $$("[data-open-profile]").forEach((item) => item.addEventListener("click", openP
 $("#openProfileDialog").addEventListener("click", openProfileDialog);
 $("#profileForm").addEventListener("submit", createProfile);
 $("#refreshButton").addEventListener("click", () => refreshStatus(true));
+$("#startInstance").addEventListener("click", () => controlInstance("start"));
+$("#restartInstance").addEventListener("click", () => {
+  if (window.confirm("确认重启 OpenVPN 实例？当前 VPN 会话会断开。")) {
+    controlInstance("restart");
+  }
+});
+$("#stopInstance").addEventListener("click", () => {
+  if (window.confirm("确认停止 OpenVPN 实例？运维面板会继续运行，可随时重新启动。")) {
+    controlInstance("stop");
+  }
+});
+$("#logoutButton").addEventListener("click", async () => {
+  try {
+    await fetch("/api/auth/logout", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+  } finally {
+    location.replace("/login");
+  }
+});
 $("#connectionSearch").addEventListener("input", debounce(loadConnectionAudit, 250));
 $("#connectionEvent").addEventListener("change", loadConnectionAudit);
 $("#connectionRange").addEventListener("change", loadConnectionAudit);

@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ADMIN_DIR = Path(__file__).parents[1] / "admin"
@@ -15,6 +16,8 @@ import geoip_service
 import monitors
 import runtime_config
 import storage
+import vpn_control
+import vpn_control_client
 
 
 class StatusParserTest(unittest.TestCase):
@@ -68,18 +71,50 @@ class ProfileValidationTest(unittest.TestCase):
 
 
 class AuthenticationTest(unittest.TestCase):
-    def test_auth_can_be_disabled_for_authenticated_reverse_proxy(self):
-        handler = object.__new__(server.AdminHandler)
-        handler.path = "/api/status"
-        original = os.environ.get("WEB_UI_AUTH_ENABLED")
+    def setUp(self):
+        server.invalidate_sessions()
+        server._LOGIN_ATTEMPTS.clear()
+
+    def test_web_session_expires(self):
+        token = server.create_session("admin", now=100)
+        self.assertEqual(server.session_value(token, now=101)["username"], "admin")
+        self.assertIsNone(
+            server.session_value(token, now=100 + server.SESSION_TTL_SECONDS + 1)
+        )
+
+    def test_bootstrap_credentials_are_supported(self):
+        original_password = os.environ.get("WEB_UI_PASSWORD")
+        original_username = os.environ.get("WEB_UI_USERNAME")
+        original_db = storage.DB_PATH
         try:
-            os.environ["WEB_UI_AUTH_ENABLED"] = "false"
-            self.assertTrue(handler._require_auth())
+            with tempfile.TemporaryDirectory() as directory:
+                storage.DB_PATH = Path(directory) / "admin.db"
+                storage.initialize()
+                os.environ["WEB_UI_USERNAME"] = "admin"
+                os.environ["WEB_UI_PASSWORD"] = "bootstrap-password"
+                self.assertTrue(server.credentials_match("admin", "bootstrap-password"))
+                self.assertFalse(server.credentials_match("admin", "wrong"))
         finally:
-            if original is None:
-                os.environ.pop("WEB_UI_AUTH_ENABLED", None)
+            storage.DB_PATH = original_db
+            if original_password is None:
+                os.environ.pop("WEB_UI_PASSWORD", None)
             else:
-                os.environ["WEB_UI_AUTH_ENABLED"] = original
+                os.environ["WEB_UI_PASSWORD"] = original_password
+            if original_username is None:
+                os.environ.pop("WEB_UI_USERNAME", None)
+            else:
+                os.environ["WEB_UI_USERNAME"] = original_username
+
+    def test_login_failures_are_rate_limited(self):
+        for timestamp in range(server.LOGIN_MAX_ATTEMPTS):
+            server.record_login_failure("127.0.0.1", now=timestamp)
+        blocked, retry = server.login_blocked(
+            "127.0.0.1", now=server.LOGIN_MAX_ATTEMPTS
+        )
+        self.assertTrue(blocked)
+        self.assertGreater(retry, 0)
+        server.clear_login_failures("127.0.0.1")
+        self.assertFalse(server.login_blocked("127.0.0.1", now=10)[0])
 
 
 class TrafficAuditTest(unittest.TestCase):
@@ -181,6 +216,53 @@ class ConsoleSecurityTest(unittest.TestCase):
         self.assertNotIn("a-strong-console-password", encoded)
         self.assertTrue(server._password_matches("a-strong-console-password", encoded))
         self.assertFalse(server._password_matches("wrong-password", encoded))
+
+
+class VpnInstanceControlTest(unittest.TestCase):
+    def test_desired_instance_state_is_persisted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            original_path = vpn_control.STATE_PATH
+            try:
+                vpn_control.STATE_PATH = Path(directory) / "instance-state.json"
+                manager = vpn_control.InstanceManager()
+                manager.desired_running = False
+                manager._save_desired_state()
+                restored = vpn_control.InstanceManager()
+                self.assertFalse(restored.desired_running)
+                self.assertEqual(restored.status()["state"], "stopped")
+            finally:
+                vpn_control.STATE_PATH = original_path
+
+    def test_control_client_uses_private_bearer_api(self):
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return b'{"controller":"online","state":"running"}'
+
+        original_url = vpn_control_client.CONTROL_URL
+        original_token = vpn_control_client.CONTROL_TOKEN
+        try:
+            vpn_control_client.CONTROL_URL = "http://127.0.0.1:9090"
+            vpn_control_client.CONTROL_TOKEN = "test-token"
+            with mock.patch.object(
+                vpn_control_client, "urlopen", return_value=Response()
+            ) as open_request:
+                result = vpn_control_client.request("restart")
+            request_value = open_request.call_args.args[0]
+            self.assertEqual(request_value.full_url, "http://127.0.0.1:9090/restart")
+            self.assertEqual(request_value.method, "POST")
+            self.assertEqual(
+                request_value.get_header("Authorization"), "Bearer test-token"
+            )
+            self.assertEqual(result["state"], "running")
+        finally:
+            vpn_control_client.CONTROL_URL = original_url
+            vpn_control_client.CONTROL_TOKEN = original_token
 
 
 if __name__ == "__main__":

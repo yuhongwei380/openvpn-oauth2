@@ -88,23 +88,23 @@ sysctl -w net.ipv4.ip_forward=1
 
 # IPv4 NAT规则
 if [ "$ENABLE_IPV4_NAT" = "true" ]; then
-  iptables -t nat -A POSTROUTING -s "$OVPN_NETWORK/$OVPN_NETMASK" -o "$NAT_OUTBOUND_INTERFACE" -j MASQUERADE
-  iptables -A FORWARD -d "$OVPN_NETWORK/$OVPN_NETMASK" -j ACCEPT
-  iptables -A FORWARD -s "$OVPN_NETWORK/$OVPN_NETMASK" -j ACCEPT
+  iptables -t nat -C POSTROUTING -s "$OVPN_NETWORK/$OVPN_NETMASK" -o "$NAT_OUTBOUND_INTERFACE" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s "$OVPN_NETWORK/$OVPN_NETMASK" -o "$NAT_OUTBOUND_INTERFACE" -j MASQUERADE
+  iptables -C FORWARD -d "$OVPN_NETWORK/$OVPN_NETMASK" -j ACCEPT 2>/dev/null || iptables -A FORWARD -d "$OVPN_NETWORK/$OVPN_NETMASK" -j ACCEPT
+  iptables -C FORWARD -s "$OVPN_NETWORK/$OVPN_NETMASK" -j ACCEPT 2>/dev/null || iptables -A FORWARD -s "$OVPN_NETWORK/$OVPN_NETMASK" -j ACCEPT
   if [ "$OVPN_PROTO" = "tcp-server" ]; then
     FIREWALL_PROTO=tcp
   else
     FIREWALL_PROTO=udp
   fi
-  iptables -A INPUT -p "$FIREWALL_PROTO" --dport "$OVPN_PORT" -j ACCEPT
+  iptables -C INPUT -p "$FIREWALL_PROTO" --dport "$OVPN_PORT" -j ACCEPT 2>/dev/null || iptables -A INPUT -p "$FIREWALL_PROTO" --dport "$OVPN_PORT" -j ACCEPT
   echo "🔗 已启用IPv4 NAT规则"
 fi
 
 # IPv6 NAT规则（如果启用IPv6）
 if [ "$OVPN_IPV6_ENABLE" = "true" ] && [ "$ENABLE_IPV6_NAT" = "true" ]; then
-  ip6tables -t nat -A POSTROUTING -s "$OVPN_IPV6_NETWORK" -o "$NAT_OUTBOUND_INTERFACE" -j MASQUERADE
-  ip6tables -A FORWARD -d "$OVPN_IPV6_NETWORK" -j ACCEPT
-  ip6tables -A FORWARD -s "$OVPN_IPV6_NETWORK" -j ACCEPT
+  ip6tables -t nat -C POSTROUTING -s "$OVPN_IPV6_NETWORK" -o "$NAT_OUTBOUND_INTERFACE" -j MASQUERADE 2>/dev/null || ip6tables -t nat -A POSTROUTING -s "$OVPN_IPV6_NETWORK" -o "$NAT_OUTBOUND_INTERFACE" -j MASQUERADE
+  ip6tables -C FORWARD -d "$OVPN_IPV6_NETWORK" -j ACCEPT 2>/dev/null || ip6tables -A FORWARD -d "$OVPN_IPV6_NETWORK" -j ACCEPT
+  ip6tables -C FORWARD -s "$OVPN_IPV6_NETWORK" -j ACCEPT 2>/dev/null || ip6tables -A FORWARD -s "$OVPN_IPV6_NETWORK" -j ACCEPT
   
   echo "🔗 已启用IPv6 NAT规则"
 fi
@@ -149,14 +149,28 @@ mkdir -p /run/openvpn
 # 启动 OAuth2 认证服务（后台运行）
 echo "🚀 启动 OAuth2 认证服务..."
 /usr/local/bin/openvpn-auth-oauth2 &
+OAUTH2_PID=$!
 
 # Web 管理控制台是运行配置的唯一管理入口，始终随服务启动。
-echo "Starting OpenVPN Web UI on ${WEB_UI_LISTEN:-0.0.0.0:8080}..."
-python3 /opt/openvpn-admin/server.py &
 
 # 等待一下让 OAuth2 服务启动
 sleep 3
 
 # 启动 OpenVPN 服务
 echo "🚀 启动 OpenVPN 服务..."
-exec openvpn /etc/openvpn/server.conf
+openvpn /etc/openvpn/server.conf &
+OPENVPN_PID=$!
+
+cleanup_instance() {
+  kill "$OPENVPN_PID" "$OAUTH2_PID" 2>/dev/null || true
+  wait "$OPENVPN_PID" "$OAUTH2_PID" 2>/dev/null || true
+}
+
+trap cleanup_instance TERM INT EXIT
+set +e
+wait -n "$OPENVPN_PID" "$OAUTH2_PID"
+INSTANCE_EXIT=$?
+set -e
+cleanup_instance
+trap - TERM INT EXIT
+exit "$INSTANCE_EXIT"

@@ -164,6 +164,15 @@ Blue is reserved for commands, focus, and selected navigation. Green, orange, an
 - Console passwords are never encrypted reversibly: persist only a salted PBKDF2-SHA256 hash. The environment bootstrap password remains a first-login fallback until a Web-managed password is saved.
 - The Web listener and encryption root key cannot move into runtime configuration because the console and decryptor need them before the settings database is available. Keep those bootstrap dependencies visibly documented rather than pretending they are hot-configurable.
 
+### Console login
+
+- Authentication uses a first-party HTML login page, never the browser-native HTTP Basic Auth prompt.
+- The page stays in the warm-gray operations world: a white form panel is the focal surface and a single tunnel-navy companion panel explains the `ADMIN → OAUTH2 → VPN` control path.
+- Login fields are 46px inset controls with native labels, autocomplete semantics, visible focus, an explicit password-visibility control, inline error feedback, and a 44px command-blue submit button.
+- Desktop uses a balanced two-panel card capped at 920px. Below 820px it becomes one column; below 520px it uses a 16px viewport gutter without horizontal overflow.
+- Successful authentication creates an HttpOnly, SameSite=Strict session cookie with a fixed 12-hour maximum lifetime. Repeated failures are rate-limited; logout explicitly invalidates the server-side session.
+- The app top bar keeps logout as a compact icon action after refresh. Expired API sessions redirect to `/login` while preserving a same-origin return path.
+
 ## Complete UI inventory and functional specification
 
 ### Application shell
@@ -195,6 +204,15 @@ Blue is reserved for commands, focus, and selected navigation. Green, orange, an
 - Filter bar: keyword search, instance, event type, time range, and refresh cadence; use the shared custom-select behavior and preserve native form values.
 - Table fields: time, connect/disconnect event, user, instance, source address, VPN IP, received/sent bytes, and session duration.
 - CSV export mirrors the active filter context.
+
+### VPN instance lifecycle
+
+- The operations console is the persistent control plane; stopping the VPN data plane must never make the console unavailable.
+- The instance page shows one authoritative textual state: running, starting, stopping, stopped, failed, or controller unavailable.
+- Lifecycle controls are grouped in a dedicated neutral strip below the instance identity. Order is start, restart, stop; stop uses the outlined danger treatment.
+- Start is disabled while running/starting. Stop is disabled while stopped/stopping. Restart and stop warn that active VPN sessions will disconnect.
+- A stopped instance uses neutral gray rather than red. Red is reserved for a failed instance or unavailable controller.
+- Supporting copy must state that stop affects only OpenVPN/OAuth2 child processes and that the Web console remains accessible.
 
 ### Traffic audit
 

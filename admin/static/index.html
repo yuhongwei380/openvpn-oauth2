@@ -28,7 +28,7 @@
           <button class="nav-item" data-view="branding"><svg><use href="#icon-shield"/></svg><span>品牌设置</span></button>
         </nav>
         <div class="sidebar-foot">
-          <div class="service-mini"><span class="status-dot"></span><span><strong>服务运行中</strong><small id="sidebarUptime">正在读取状态</small></span></div>
+          <div class="service-mini" id="sidebarService"><span class="status-dot"></span><span><strong id="sidebarServiceState">控制面在线</strong><small id="sidebarUptime">正在读取状态</small></span></div>
         </div>
       </aside>
 
@@ -36,23 +36,23 @@
         <header class="topbar">
           <button class="icon-button menu-button" id="menuButton" aria-label="打开导航"><svg><use href="#icon-menu"/></svg></button>
           <div class="breadcrumbs"><span>VPN 管理</span><i>/</i><strong id="currentPage">运行概览</strong></div>
-          <div class="top-actions"><span class="last-refresh" id="lastRefresh">尚未刷新</span><button class="button secondary compact" id="refreshButton"><svg><use href="#icon-refresh"/></svg>刷新</button></div>
+          <div class="top-actions"><span class="last-refresh" id="lastRefresh">尚未刷新</span><button class="button secondary compact" id="refreshButton"><svg><use href="#icon-refresh"/></svg>刷新</button><button class="icon-button logout-button" id="logoutButton" aria-label="退出登录" title="退出登录"><svg><use href="#icon-logout"/></svg></button></div>
         </header>
 
         <div class="content">
           <section class="view active" id="view-overview">
             <div class="page-heading">
               <div><p class="eyebrow">SYSTEM OVERVIEW</p><h1>运行概览</h1><p>查看 OAuth2 认证到 VPN 隧道的完整运行状态。</p></div>
-              <span class="health-pill"><span></span>系统正常</span>
+              <span class="health-pill" id="overviewHealth"><span></span><b>正在检查</b></span>
             </div>
             <div class="tunnel-card">
               <div class="tunnel-copy"><span class="section-kicker">认证链路</span><h2>OAuth2 隧道已就绪</h2><p id="tunnelDescription">身份提供商、认证代理和 OpenVPN 服务正在协同工作。</p></div>
               <div class="tunnel-path" aria-label="认证链路状态">
                 <div class="tunnel-node"><span><svg><use href="#icon-shield"/></svg></span><strong>OAuth2</strong><small id="oauthNodeState">已配置</small></div>
                 <div class="tunnel-line"><i></i></div>
-                <div class="tunnel-node"><span><svg><use href="#icon-key"/></svg></span><strong>认证代理</strong><small>在线</small></div>
+                <div class="tunnel-node"><span><svg><use href="#icon-key"/></svg></span><strong>认证代理</strong><small id="authProxyNodeState">正在检查</small></div>
                 <div class="tunnel-line"><i></i></div>
-                <div class="tunnel-node"><span><svg><use href="#icon-lock"/></svg></span><strong>OpenVPN</strong><small>在线</small></div>
+                <div class="tunnel-node"><span><svg><use href="#icon-lock"/></svg></span><strong>OpenVPN</strong><small id="openvpnNodeState">正在检查</small></div>
               </div>
             </div>
             <div class="metrics">
@@ -75,9 +75,17 @@
           </section>
 
           <section class="view" id="view-instance">
-            <div class="page-heading"><div><p class="eyebrow">VPN INSTANCE</p><h1>VPN 实例</h1><p>检查当前由容器编排管理的 OpenVPN 服务实例。</p></div><span class="health-pill"><span></span>运行中</span></div>
+            <div class="page-heading"><div><p class="eyebrow">VPN INSTANCE</p><h1>VPN 实例</h1><p>运维面板常驻运行，可独立启动、停止或重启 OpenVPN 实例。</p></div><span class="health-pill" id="instanceHealth"><span></span><b>正在检查</b></span></div>
             <article class="panel instance-card">
-              <div class="instance-lead"><span class="instance-mark"><svg><use href="#icon-server"/></svg></span><div><div class="instance-title"><h2>default</h2><span class="status-badge">运行中</span></div><p>OAuth2 单实例 · 容器生命周期管理</p></div><strong id="instanceOnline">0 <small>在线</small></strong></div>
+              <div class="instance-lead"><span class="instance-mark"><svg><use href="#icon-server"/></svg></span><div><div class="instance-title"><h2>default</h2><span class="status-badge" id="instanceStateBadge">正在检查</span></div><p>OAuth2 单实例 · 独立进程生命周期控制</p></div><strong id="instanceOnline">0 <small>在线</small></strong></div>
+              <div class="instance-controls" aria-label="VPN 实例控制">
+                <div><strong>实例控制</strong><small id="instanceControlHint">正在连接内部控制服务</small></div>
+                <div class="instance-control-actions">
+                  <button class="button secondary" id="startInstance"><svg><use href="#icon-play"/></svg>启动</button>
+                  <button class="button secondary" id="restartInstance"><svg><use href="#icon-refresh"/></svg>重启</button>
+                  <button class="button danger-outline" id="stopInstance"><svg><use href="#icon-stop"/></svg>停止</button>
+                </div>
+              </div>
               <div class="instance-facts" id="instanceFacts"></div>
               <div class="instance-workflow">
                 <button class="workflow-step active" data-go="settings"><span>01</span><strong>服务配置</strong><small>通过网页集中管理</small></button>
@@ -85,7 +93,7 @@
                 <button class="workflow-step" data-go="profiles"><span>03</span><strong>客户端配置</strong><small>生成与导出</small></button>
                 <button class="workflow-step" data-go="docs"><span>04</span><strong>部署运维</strong><small>查看本地文档</small></button>
               </div>
-              <div class="orchestration-note"><svg><use href="#icon-info"/></svg><div><strong>生命周期由 Docker Compose 管理</strong><p>为了避免停止 PID 1 导致容器异常退出，本页面不提供伪造的停止或重启按钮。请使用 <code>docker compose restart openvpn</code>。</p></div></div>
+              <div class="orchestration-note"><svg><use href="#icon-info"/></svg><div><strong>控制面与数据面已解耦</strong><p>停止操作只会结束 OpenVPN 与 OAuth2 实例进程；内部控制服务和运维面板保持在线，可随时从本页面重新启动。</p></div></div>
             </article>
           </section>
 
@@ -156,12 +164,12 @@
               <span class="readonly-pill" id="settingsState"><svg><use href="#icon-lock"/></svg>持久化配置</span>
             </div>
             <div class="configuration-intro">
-              <div><span class="section-kicker">配置策略</span><h2>日常调整留在控制台</h2><p>保存后写入持久化卷。流量采集与控制台安全即时生效；OpenVPN、OAuth2 和网络参数在重启容器后生效。</p></div>
+              <div><span class="section-kicker">配置策略</span><h2>日常调整留在控制台</h2><p>保存后写入持久化卷。流量采集与控制台安全即时生效；OpenVPN、OAuth2 和网络参数在网页重启 VPN 实例后生效。</p></div>
               <dl><div><dt>环境变量</dt><dd>仅保留加密主密钥与首次登录密码</dd></div><div><dt>敏感字段</dt><dd>AES-256 加密后落盘，不回传明文</dd></div></dl>
             </div>
             <form id="systemSettingsForm" class="configuration-form">
               <article class="panel configuration-panel">
-                <div class="panel-header"><div><h2>OpenVPN 服务</h2><p>客户端端点、隧道设备与 IPv4 地址池</p></div><span class="apply-badge restart">重启后生效</span></div>
+                <div class="panel-header"><div><h2>OpenVPN 服务</h2><p>客户端端点、隧道设备与 IPv4 地址池</p></div><span class="apply-badge restart">重启实例后生效</span></div>
                 <div class="form-grid">
                   <label class="field field-wide"><span>公网域名或 IP</span><input name="server.remoteHost" maxlength="253" placeholder="vpn.example.com" /><small>生成客户端配置时使用的连接地址</small></label>
                   <label class="field"><span>监听端口</span><input name="server.port" type="number" min="1" max="65535" required /></label>
@@ -175,7 +183,7 @@
               </article>
 
               <article class="panel configuration-panel">
-                <div class="panel-header"><div><h2>路由与 IPv6</h2><p>NAT、IPv6 地址池和内部路由</p></div><span class="apply-badge restart">重启后生效</span></div>
+                <div class="panel-header"><div><h2>路由与 IPv6</h2><p>NAT、IPv6 地址池和内部路由</p></div><span class="apply-badge restart">重启实例后生效</span></div>
                 <div class="switch-list">
                   <label class="switch-row"><span><strong>IPv4 NAT</strong><small>允许 VPN 客户端通过宿主机访问外部网络</small></span><input type="checkbox" name="networking.ipv4Nat" /><i></i></label>
                   <label class="switch-row"><span><strong>启用 IPv6</strong><small>为客户端分配 IPv6 地址并开启转发</small></span><input type="checkbox" name="networking.ipv6Enabled" id="ipv6Enabled" /><i></i></label>
@@ -195,7 +203,7 @@
               </article>
 
               <article class="panel configuration-panel">
-                <div class="panel-header"><div><h2>OAuth2 认证</h2><p>身份提供商、客户端和回调参数</p></div><span class="apply-badge restart">重启后生效</span></div>
+                <div class="panel-header"><div><h2>OAuth2 认证</h2><p>身份提供商、客户端和回调参数</p></div><span class="apply-badge restart">重启实例后生效</span></div>
                 <div class="form-grid">
                   <label class="field field-wide"><span>Issuer URL</span><input name="oauth2.issuer" type="url" placeholder="https://login.example.com/realms/vpn" /></label>
                   <label class="field field-wide"><span>Client ID</span><input name="oauth2.clientId" autocomplete="off" /></label>
@@ -323,6 +331,9 @@
       <symbol id="icon-certificate" viewBox="0 0 24 24"><circle cx="12" cy="9" r="6"/><path d="m8 14-2 8 6-3 6 3-2-8"/></symbol>
       <symbol id="icon-book" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 5.5v14"/></symbol>
       <symbol id="icon-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+      <symbol id="icon-logout" viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3"/><path d="M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5"/></symbol>
+      <symbol id="icon-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></symbol>
+      <symbol id="icon-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></symbol>
     </svg>
     <script src="/app.js"></script>
   </body>

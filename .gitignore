@@ -4,6 +4,7 @@ __pycache__/
 admin-data/
 geoip/
 certs/
+client-configs/
 test-screenshots/
 *.tar
 *.log

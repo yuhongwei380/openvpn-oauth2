@@ -61,13 +61,14 @@ RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh \
     /usr/local/bin/generate-client-config.sh \
     && chmod +x /usr/local/bin/entrypoint.sh \
     && chmod +x /usr/local/bin/generate-certs.sh \
-    && chmod +x /usr/local/bin/generate-client-config.sh
+    && chmod +x /usr/local/bin/generate-client-config.sh \
+    && bash -n /usr/local/bin/entrypoint.sh
 
 # 开放VPN端口
 EXPOSE 1194/udp
-EXPOSE 8080/tcp
+EXPOSE 9090/tcp
 
 # 持久化存储
 VOLUME ["/etc/openvpn/certs"]
 
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+ENTRYPOINT ["python3", "/opt/openvpn-admin/vpn_control.py"]
